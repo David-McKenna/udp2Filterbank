@@ -21,51 +21,105 @@
 #2019-03-22 Modified by Joe McCauley
 #Add ra & dec optional parameters
 #
-#2019-10-7 Modified By David McKenna
-#Make the ram_factor actually effect the ram allocation as well as core count
-#   This was implemented through the new 'loop' system for chunking and running
-#   the relevant filter script on the chunks.
+#2019-10-* Modified by David McKenna
+#   No longer apply chunking to the input dataset; use a new Cython-based backend
+#   to read / process / write the data to a single output file. Also adds in time/
+#   frequency tradeoffs for dealing with shorter period / higher DM pulsars.
 
 if ($#argv < 6) then
-    echo "Usage: csh bf2fil.csh [pcap_filename] [npackets] [mode] [ram_factor] [fch1] (optional parameters are [RA](J2000, format hh:mm:ss.ddd) [DEC] (J2000, format dd.mm.ss.ddd))"
+    echo "Usage: csh bf2fil.csh [pcap_filename] [npackets] [mode] [ram_factor] [fch1] [output_filename] (optional parameters are [stokesI (0/1)] [stokesV (0/1)] [time_averaging_length] [frequency_FFT_window] [pulsar name] [RA](J2000, format hh:mm:ss.ddd) [DEC] (J2000, format dd.mm.ss.ddd))"
     goto marbh
 endif
 
+
+# Initialisation
 set file       = $argv[1]
 set npackets   = $argv[2]
 set mode       = $argv[3] # evan or olaf
-set ram_factor = $argv[4] # Set some kind of arbitrary nice-ness factor (sets what fraction of cpu cores to use)
+set ram_factor = $argv[4] # Set some kind of arbitrary nice-ness factor (sets what fraction of cpu cores/est. ram can be used)
 set fch1       = $argv[5] # set the frequency of the top channel
 set outfile    = $argv[6]
-if ( $#argv == 7 ) then
-    set ra     = $argv[6]
-    set dec    = $argv[7]
+
+if ( $#argv > 6 ) then
+    set stokesI = $argv[7]
+    set stokesV = $argv[8]
+
+    if ( $stokesI == $stokesV ) then
+        if ( $stokesI == 0 ) then
+            echo "You have to get some kind of Stokes output..."
+            goto marbh
+        endif
+    endif
+else
+    set stokesI = 1
+    set stokesV = 0
+endif
+
+if ( $#argv == 10 ) then
+    set timeWindow = $argv[9]
+    set fftWindow = $argv[10]
+    echo "Time averaged over "$timeWindow" steps"
+    echo "Trading time for frequency resolution over "$fftWindow" steps."
+else 
+    set timeWindow = 1
+    set fftWindow = 1
+endif
+
+
+if ( $#argv == 11 ) then
+    set psrName = $argv[11]
+    echo "Pulsar Name "$psrName
+else 
+    set psrName = "J0000+0000"
+endif
+
+if ( $#argv == 13 ) then
+    set ra     = $argv[12]
+    set dec    = $argv[13]
     echo "RA="$ra
     echo "DEC="$dec
 else
     set ra = 0
     set dec = 0
 endif
-set tel = 11
-# How many processors do we have?
+
+set tel = 11 # LOFAR in PRESTO/Sigproc.
+
+
+
+# Exit if the output file exists
+if ( -f $outfile ) then
+    echo "Output file "$outfile" already exists, exiting before we overwrite any data."
+    goto marbh
+endif
+
+
+
+# What are we running on? How many CPU cores?
 set host = `uname`
 echo $host
 if ($host == "Darwin") then       # We're on a Mac
-    echo '2019-10-07 Changes: May no longer be comptible, atteppting to continue...'
+    echo '2019-10 Changes: Compatibility has not been tested, attempting to continue...'
     set nprocessors = `sysctl -n hw.physicalcpu`
 else if ($host == "Linux") then   # We're on a Linux
     set nprocessors = `nproc`
 endif
 
+
+
+# What resources are available?
 set ram = `grep MemTotal /proc/meminfo | awk '{print $2*1024}'` # Get total RAM in bytes
+set ramcap = `echo $ram | awk -v ram_factor=$ram_factor '{print int($1*ram_factor)}'`
 
-echo 'Available memory '$ram
+echo 'You have '$ram' bytes of ram available.'
+echo 'We will plan to use less than '$ramcap' bytes.'
 
-echo "You have" $nprocessors "processors available"
+echo "You have" $nprocessors "processors available."
 set ncores_avail = `echo $nprocessors | awk -v ram_factor=$ram_factor '{print int($1*ram_factor)}'`
-echo "Using" $ncores_avail "of these"
+echo "Using up to" $ncores_avail "of these."
 
-set ncores_avail = 4
+
+
 # Figure out the headersizes of the packets
 if ($mode == "evan" ) then
     set headersize  = 98   # bytes
@@ -77,139 +131,67 @@ else
     echo "Don't recognise recording mode. Slán."
     goto marbh
 endif
+
 echo "Data recorded in" $mode "mode"
 
-set memal = `echo $packet_size $npackets | awk '{print 3*$1*$2}'` # 3 seems like a slightly overboard prediction, but better to be safe than sorry.
+
+
+# Determine the size of each execution
+set memal = `echo $packet_size $npackets | awk '{print 2*$1*$2}'` # 3 seems like a slightly overboard prediction comapred to runs, but theoretically it should
+                                                                  # be closer to 4-5 but runtime is normally ~ 2-3.
 set data_cap = `echo $ram | awk -v ram_factor=$ram_factor '{print $1*ram_factor}'`
 set nloops = `echo $data_cap $memal | awk '{print int($2/$1)}'`
-#set nloops = 1
-
 set nloopsprint = `echo $data_cap $memal | awk '{print int($2/$1)+1}'` # True lazy mode
 
+echo ""
+echo 'Processing data in '$nloopsprint' segments.'
 
-echo 'Predicted memory allocation '$memal
-echo 'Memory cap '$data_cap
+# Known issue: final chunk is not handled gracefully here; Cython code should be able to handle it through.
+set packets_per_chunk = `echo $npackets $nloopsprint | awk '{print int($1/$2)}'`
+set chunksize = `echo $packets_per_chunk $packet_size | awk '{print $1*$2}'`
+set total_data = `echo $packet_size $npackets | awk '{print $1*$2}'`
 
-set nloops = 1
-#set outfile = "file_stokesV.fil"
-
-#Chop up the file
-if ($nloops == 0) then
-    
-    echo 'Processing data in 1 loop.'
-    set packets_per_chunk = `echo $ncores_avail $npackets | awk '{print int($2/$1)-int($2/$1)}'`
-    set chunksize = `echo $packets_per_chunk $packet_size | awk '{print $1*$2}'`
-    echo 'Chunksize ' $chunksize ' Packets per chunk' $packets_per_chunk
-
-    foreach chunk (`seq 1 $ncores_avail`)
-        set hd = `echo $chunk $chunksize | awk '{print $1*$2}'`
-        echo "Chunk" $chunk
-        schedtool -a $chunk -e head -c $hd $file | tail -c $chunksize > "chunk"$chunk &
-#       head -c $hd $file | tail -c $chunksize > "chunk"$chunk
-        echo "Done"
-    end
-    wait # wait for the chunking up of the data to be complete before 
-
-    # Run bf2fil.py on each chunk, using a different processor for each
-    foreach chunk (`seq 1 $ncores_avail`)
-        if ($mode == "evan") then
-            echo "Running bf2fil.py on chunk" $chunk
-            schedtool -a $chunk -e python /home/obs/Joe/realta_scripts/bf2fil.py -infile "chunk"$chunk -npackets $packets_per_chunk -nbeamlets 122 -nbits 8 -mode $mode -o "chunk"$chunk".tmp" &
-        else if ($mode == "olaf") then
-            echo "Running udp2fil.py on chunk" $chunk
-            schedtool -a $chunk -e python3 ./udp2fil_cywrapper.py -infile "chunk"$chunk -npackets $packets_per_chunk -o "chunk"$chunk".tmp" &
-        endif
-    end
-    wait # wait for all the bf2fil.py calls to finish before progressing
-    
-    skip:
-    rm full.tmp
-    echo "Re-stitching the chunks"
-    foreach chunk (`seq 1 $ncores_avail`)
-        cat "chunk"$chunk".tmp" >> full.tmp
-    end
+echo "Processing "$packets_per_chunk" packets every execution, giving a chunksize of "$chunksize
+echo ""
 
 
-else
-
-    echo 'Processing data in '$nloopsprint' loops.'
-
-    set packets_per_chunk = `echo $ncores_avail $npackets $nloopsprint | awk '{print int($2/$1/$3)-int($2/$1/$3)%16}'`
-    set chunksize = `echo $packets_per_chunk $packet_size | awk '{print $1*$2}'`
-    set total_data = `echo $packet_size $npackets | awk '{print $1*$2}'`
-    echo 'Chunksize ' $chunksize ' Packets per chunk' $packets_per_chunk
-    #goto skiptome
-    #goto skip
-
-    echo "Sticking on a SIGPROC header"
-    #get the obs start MJD from the filename for the header
-    echo 'this is the file'$file
-    set tmpstr=`python /home/obs/Joe/realta_scripts/dump_filetime_mjd.py -infile $file | grep MJD:`
-    set MJD=`echo $tmpstr | grep -o -E '[0-9.]+'`
-    echo "Obs. MJD =  "$MJD
-    if ( $ra == 0 ) then
-        /home/obs/Joe/realta_scripts/mockHeader/mockHeader -tel $tel -tsamp 0.00008192 -fch1 $fch1 -fo -0.01220703125 -nchans 1952 -nbits 32 -tstart $MJD headerfile_341
-#        /home/obs/Joe/realta_scripts/mockHeader/mockHeader -tel $tel -tsamp 0.00000512 -fch1 $fch1 -fo -0.01220703125 -nchans 1952 -nifs 1 -nbits 32 -tstart $MJD headerfile_341
-    else
-        /home/obs/Joe/realta_scripts/mockHeader/mockHeader -tel $tel -tsamp 0.00008192 -fch1 $fch1 -fo -0.1953125 -nchans 122 -nbits 32 -tstart $MJD  -ra $ra -dec $dec headerfile_341
-    endif
-    cat headerfile_341 >> $outfile
-
-
-    foreach loop (`seq 0 $nloops`)
-        foreach chunk (`seq 1 $ncores_avail`)
-            set newchunk = `echo $chunk $loop $ncores_avail | awk '{print $1+$2*$3}'`
-            set hd = `echo $newchunk $chunksize | awk '{print $1*$2}'`
-            echo "Chunk" $newchunk", hd "$hd", File Size "$total_data""
-	    #python3 ./udp2fil_cywrapper.py -infile "chunk"$newchunk -npackets $packets_per_chunk -o "chunk"$newchunk".tmp"
-            python3 ./udp2fil_cywrapper.py -infile $file -start $hd -readlength $chunksize -o $outfile
-#            schedtool -a $chunk -e head -c $hd $file | tail -c $chunksize > "chunk"$newchunk &
-#           head -c $hd $file | tail -c $chunksize > "chunk"$chunk
-            echo "Done"
-        end
-#        wait # wait for the chunking up of the data to be complete before
-    end
-    goto skip3
-    skiptome:
-    foreach loop (`seq 0 $nloops`)
-        foreach chunk (`seq 1 $ncores_avail`)
-            set newchunk = `echo $chunk $loop $ncores_avail | awk '{print $1+$2*$3}'`
-            if ($mode == "evan") then
-                echo "Running bf2fil.py on chunk" $newchunk
-                schedtool -a $chunk -e python /home/obs/Joe/realta_scripts/bf2fil.py -infile "chunk"$newchunk -npackets $packets_per_chunk -nbeamlets 122 -nbits 8 -mode $mode -o "chunk"$newchunk".tmp" &
-            else if ($mode == "olaf") then
-                echo "Running udp2fil.py on chunk" $newchunk
-                #schedtool -a $chunk -e python3 ./udp2fil_cywrapper.py -infile "chunk"$newchunk -npackets $packets_per_chunk -o "chunk"$newchunk".tmp" &
-#                schedtool -a $chunk -e python3 ./udp2fil_cywrapper.py -infile "chunk"$newchunk -npackets $packets_per_chunk -o "chunk"$newchunk".tmp" &
-		# New code has inbuild paralelisation
-		python3 ./udp2fil_cywrapper.py -infile "chunk"$newchunk -npackets $packets_per_chunk -o "chunk"$newchunk".tmp"
-		#echo "Sleeping for "$varsleep"s for prevent file i/o bottleneck
-            endif
-        end
-#        wait # wait for all the bf2fil.py calls to finish before progressing
-    end
-    skip3:
-    exit
-endif
-
-
-
-skip:
-
+# Prep the output filterbank with a fake header
 echo "Sticking on a SIGPROC header"
+echo""
 #get the obs start MJD from the filename for the header
-echo 'this is the file'$file
 set tmpstr=`python /home/obs/Joe/realta_scripts/dump_filetime_mjd.py -infile $file | grep MJD:`
 set MJD=`echo $tmpstr | grep -o -E '[0-9.]+'`
+set fo = `echo -0.1953125 $fftWindow | awk '{print $1/$2}'`
+set nchan = `echo 122 $fftWindow | awk '{print $1*$2}'`
+set tsamp = `echo 0.00000512 $fftWindow $timeWindow | awk '{print $1 * $2 * $3}'`
+set npols = `echo $stokesI $stokesV | awk '{print $1 +$2 }'`
+
 echo "Obs. MJD =  "$MJD
+echo "Top channel: "$fch1"MHz"
+echo "Channel Width: "$fo"MHz"
+echo "Channel Count: "$nchan
+echo "Sampling time: "$tsamp"s"
+echo "Polarisations: "$npols
+echo ""
+
+
 if ( $ra == 0 ) then
-    /home/obs/Joe/realta_scripts/mockHeader/mockHeader -tel $tel -tsamp 0.00000512 -fch1 $fch1 -fo -0.01220703125 -nchans 1952 -nbits 32 -tstart $MJD headerfile_341
+    /home/obs/Joe/realta_scripts/mockHeader/mockHeader -raw $file -tel $tel -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits 32 -tstart $MJD -nifs $npols -source $psrName headerfile_341
+#    /home/obs/Joe/realta_scripts/mockHeader/mockHeader -tel $tel -tsamp 0.00000512 -fch1 $fch1 -fo -0.01220703125 -nchans 1952 -nifs 1 -nbits 32 -tstart $MJD headerfile_341
 else
-    /home/obs/Joe/realta_scripts/mockHeader/mockHeader -tel $tel -tsamp 0.00008192 -fch1 $fch1 -fo -0.1953125 -nchans 122 -nbits 32 -tstart $MJD  -ra $ra -dec $dec headerfile_341
+    /home/obs/Joe/realta_scripts/mockHeader/mockHeader -raw $file -tel $tel -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits 32 -tstart $MJD -nifs $npols -ra $ra -dec $dec -source $psrName headerfile_341
 endif
-cat headerfile_341 full.tmp > "file2.fil"
-rm chunk*
-rm full.tmp
+cat headerfile_341 >> $outfile
+
+
+
+foreach loop (`seq 0 $nloops`)
+    set hd = `echo $loop $chunksize | awk '{print $1*$2}'`
+
+    python3 ./udp2fil_cywrapper.py -infile $file -start $hd -readlength $chunksize -o $outfile -I $stokesI -V $stokesV -sumSize $timeWindow -fftSize $fftWindow -t $ncores_avail
+
+end
+
 marbh:
 exit
 

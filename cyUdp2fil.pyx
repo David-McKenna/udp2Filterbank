@@ -7,6 +7,8 @@
 # cython: noncheck=False
 # cython: cdivision=True
 # cython: CYTHON_WITHOUT_ASSERTIONS=True
+# 
+#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 
 import numpy as np
 import time
@@ -15,20 +17,21 @@ cimport numpy as np
 
 from cython.parallel cimport prange
 
+# Import C native functions
 from libc.stdio cimport fseek, fread, fwrite, ftell, fopen, fclose, FILE, SEEK_SET, SEEK_END, printf, sprintf
 from libc.stdlib cimport malloc, free
 from libc.string cimport memcpy
 from libc.math cimport pow, sin
 
-DTYPE_1 = np.uint8
-#DTYPE_2 = np.ufloat32
-DTYPE_2 = np.float32
-#DTYPE_3 = np.float64
-ctypedef np.uint8_t DTYPE_t_1
-#ctypedef np.ufloat32_t DTYPE_t_2
-ctypedef np.float32_t DTYPE_t_2
-#ctypedef np.float64_t DTYPE_t_3
 
+# Define numpy/memoryview types
+DTYPE_1 = np.uint8
+DTYPE_2 = np.float32
+ctypedef np.uint8_t DTYPE_t_1
+ctypedef np.float32_t DTYPE_t_2
+
+
+# Import fftw3 functions (fftw3f for floating point precision)
 cdef extern from "fftw3.h" nogil:
 	ctypedef DTYPE_t_2 fftwf_complex[2]
 	ctypedef struct fftwf_plan:
@@ -44,15 +47,23 @@ cdef extern from "fftw3.h" nogil:
 	cdef int fftw_import_wisdom_from_filename(const char *filename)
 
 
+
+
+# Define our stokes functions for different forms / precisions
 cdef DTYPE_t_2 stokesI(unsigned char Xr, unsigned char Xi, unsigned char Yr, unsigned char Yi) nogil:
 	return <DTYPE_t_2> ((Xr * Xr) + (Yr * Yr) + (Xi * Xi) + (Yi * Yi))
 
 cdef DTYPE_t_2 stokesIf(DTYPE_t_2 Xr, DTYPE_t_2 Xi, DTYPE_t_2 Yr, DTYPE_t_2 Yi) nogil:
 	return <DTYPE_t_2> ((Xr * Xr) + (Yr * Yr) + (Xi * Xi) + (Yi * Yi))
 
+
 cdef DTYPE_t_2 stokesV(unsigned char Xr, unsigned char Xi, unsigned char Yr, unsigned char Yi) nogil:
 	return <DTYPE_t_2> (2 * ((Xr * Yi) + (-1 * Xi * Yr)))
 
+
+
+
+# Define  data dumping unctions for different sizes outputs (1pol/2pol)
 cdef void writeDataShrunk(DTYPE_t_2[:, ::1] dataSet, long long dataLength, char outputLoc[]) nogil:
 	printf("Writing %lld output elements to %s\n", dataLength, outputLoc)
 	cdef FILE *outRef = fopen(outputLoc, 'a')
@@ -73,9 +84,11 @@ cdef void writeData(DTYPE_t_2[:, :, ::1] dataSet, long long dataLength, char out
 
 
 
+# Main read function: handles getting all data from disk into memory.
 cpdef void readFile(char* fileLoc, int threadCount, long long readStart, long long readLength, unsigned char stokesIT, unsigned char stokesVT, int timeDecimation, int freqDecimation, char* outputLoc):
 
 
+	# Standard sanity checks.
 	if (timeDecimation <= 0):
 		raise RuntimeError(f"Issue with input Parameter: timeDecimation, {timeDecimation}")
 	if (freqDecimation <= 0):
@@ -97,9 +110,13 @@ cpdef void readFile(char* fileLoc, int threadCount, long long readStart, long lo
 
 	printf("Begining Data Read...\n")
 	t1 = time.time()
+
+	# nogil = No python memory locks
 	with nogil:
 		fseek(fileRef, 0, SEEK_END)
-		charSize = ftell(fileRef)
+		charSize = ftell(fileRef) # Get the length of the file
+
+		# Handle the case where we are asked to read beyond the EOF
 		if readLength > charSize - readStart:
 			printf("ERROR: File is %lld bytes long but you want to read %lld bytes from %lld.", charSize, readLength, readStart)
 			charSize = charSize - readStart
@@ -109,42 +126,60 @@ cpdef void readFile(char* fileLoc, int threadCount, long long readStart, long lo
 
 		fseek(fileRef, readStart, SEEK_SET)
 
+		# malloc to hold the data in memory; free'd in the sub function.
 		fileData = <DTYPE_t_1*>malloc(charSize * sizeof(DTYPE_t_1))
 		if not fread(fileData, 1, charSize, fileRef):
 			raise IOError(f"Unable to read file at {fileLoc}")
 
 		fclose(fileRef)
+
+
 	t2 = time.time()
 	cdef long long packetCount = charSize // 7824 # Divide by the length of a standard UDP packet
 	printf("Successfully Read %lld Packets into %lld bytes.\n", packetCount, charSize * sizeof(DTYPE_t_1))
 	print("This took {:.2f} seconds, giving a read speed of {:.2f}MB/s".format(t2 - t1, charSize / 1024 / 1024 / (t2 - t1)))
 
 
+	# Assume our output location is less than 1k characters long...
 	cdef char[1000] outputF
 	if outputLoc == b"":
 		sprintf(outputF, "%s.tmp", fileLoc)
 	else:
 		sprintf(outputF, "%s", outputLoc)
 
-	# fileData is free'd in this function.
+	# fileData is free'd in this function
 	processData(fileData, threadCount, packetCount, stokesIT, stokesVT, timeDecimation, freqDecimation, outputF)
 
 #cdef tuple processData(DTYPE_t_1* fileData, long packetCount, unsigned char stokesIT, unsigned char stokesVT, int timeDecimation, int freqDecimation, char* outputLoc):
 cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, unsigned char stokesIT, unsigned char stokesVT, int timeDecimation, int freqDecimation, char* outputLoc):
 
-	cdef long i, iSet
-	cdef int j, k, kSet, idx
+	# Initialise all variables.
+	cdef unsigned char Xr, Xi, Yr, Yi
 
+	cdef int j, k, kSet, l
 	cdef int beamletCount = 122
 	cdef int scans = 16
+	cdef int filterbankIdx = 0
+	cdef int filterbankLim = freqDecimation - 1
+	cdef int fftOffset = freqDecimation // 2
+	cdef int mirror = 0
 
+	cdef DTYPE_t_2 *hannWindow = <DTYPE_t_2*>malloc(sizeof(DTYPE_t_2) * freqDecimation)
+	cdef DTYPE_t_2 pi = np.pi
+
+	cdef long i, iSet
 	cdef long udpPacketLength = 7824
 	cdef long udpHeaderLength = 16
-
-	cdef long long dataLength = int(packetCount * (beamletCount) * (scans / timeDecimation) * (stokesIT + stokesVT))
-	printf("Output expected to be %lld bytes long, from %lld packets and %d modes.\n", dataLength * sizeof(DTYPE_t_2), packetCount, stokesIT + stokesVT)
+	cdef long timeIdx = 0
 	cdef long timeSteps = packetCount * scans // timeDecimation
 
+	cdef long long dataLength = int(packetCount * (beamletCount) * (scans / timeDecimation) * (stokesIT + stokesVT)) # freqDecimation has a 1:1 transfer between time/freq, so no effect on output size.
+
+
+	printf("Output expected to be %lld bytes long, from %ld packets and %d modes.\n", dataLength * sizeof(DTYPE_t_2), packetCount, stokesIT + stokesVT)
+
+
+	# Initialise memory for our data
 	structuredFileData = np.zeros((beamletCount, packetCount * scans,  4), dtype = DTYPE_1)
 
 	if stokesVT + stokesIT == 1:
@@ -166,6 +201,8 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 	cdef DTYPE_t_2[:, ::1] stokesSingleOut_view = stokesSingleOut
 	cdef DTYPE_t_2[:, :, ::1] stokesDualOut_view = stokesDualOut
 
+
+	# Initialise FFTW, WARNING, THIS IS NOT THREAD SAFE, DO NOT ATTEMPT TO OMP/PRANGE YOUR WAY TO PARALLELISM AGAIN
 	cdef fftwf_complex* inVarX = <fftwf_complex*> fftwf_malloc(sizeof(fftwf_complex) * freqDecimation);
 	cdef fftwf_complex* outVarX = <fftwf_complex*> fftwf_malloc(sizeof(fftwf_complex) * freqDecimation);
 	cdef fftwf_plan fftPlanX = fftwf_plan_dft_1d(freqDecimation, inVarX, outVarX, -1, FFTW_ESTIMATE)
@@ -174,6 +211,8 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 	cdef fftwf_complex* outVarY = <fftwf_complex*> fftwf_malloc(sizeof(fftwf_complex) * freqDecimation);
 	cdef fftwf_plan fftPlanY = fftwf_plan_dft_1d(freqDecimation, inVarY, outVarY, -1, FFTW_ESTIMATE)
 
+
+	# Change the memory from time continuous to beam continuous
 	printf("Restructuring the dataset in memory...\n")
 	cdef long baseOffset, beamletIdx, __
 	for i in prange(packetCount, nogil = True, schedule = 'guided', num_threads = threadCount):
@@ -188,25 +227,17 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 				structuredFileData_view[beamletCount - 1 - j][i * scans + k][2] = fileData[beamletIdx + kSet + 2] # Yr
 				structuredFileData_view[beamletCount - 1 - j][i * scans + k][3] = fileData[beamletIdx + kSet + 3] # Yi
 
+	# Release the raw data.
 	free(fileData)
-	cdef unsigned char Xr, Xi, Yr, Yi
-	cdef DTYPE_t_2 holdVar = 0
-	cdef DTYPE_t_2 holdVar2 = 0
-	cdef int filterbankIdx = 0
-	cdef int filterbankLim = freqDecimation - 1
-	cdef long timeIdx = 0
-	cdef int fftOffset = freqDecimation // 2
-	cdef int mirror = 0
 
-	cdef int progressCount = beamletCount
 
-	cdef DTYPE_t_2 hannWindow[16]
-	cdef DTYPE_t_2 pi = np.pi
-	for i in range(16):
-		hannWindow[i] = pow(sin(pi * i / 16), 2)
+	# Initialise the Hann window
+	for i in range(freqDecimation):
+		hannWindow[i] = pow(sin(pi * i / freqDecimation), 2)
 
 	if stokesVT and stokesIT:
 		printf("Processing Stoves I and Stokes V...\n")
+		"""
 		for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
 			for i in range(packetCount * scans):
 				Xr = structuredFileData_view[j][i][0]
@@ -231,7 +262,7 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 		writeData(stokesDualOut_view, dataLength, &outputLoc[0])
 
 		#return(stokesDualOut,)
-
+		"""
 	elif stokesIT:
 		printf("Processing Stokes I...\n")
 
@@ -265,10 +296,10 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 					#	stokesSingleOut_view[timeIdx, j * freqDecimation + (freqDecimation - 1 - i)] = outVar[i][0]
 					#stokesSingleOut_view[timeIdx, j * freqDecimation + fftOffset] = outVar[fftOffset][0]
 
-					for idx in range(fftOffset):
-						mirror = idx + fftOffset
-						stokesSingleOut_view[timeIdx, j * freqDecimation + mirror] = stokesIf(outVarX[idx][0], outVarX[idx][1], outVarY[idx][0], outVarY[idx][1])
-						stokesSingleOut_view[timeIdx, j * freqDecimation + idx] = stokesIf(outVarX[mirror][0], outVarX[mirror][1], outVarY[mirror][0], outVarY[mirror][1])
+					for l in range(fftOffset):
+						mirror = l + fftOffset
+						stokesSingleOut_view[timeIdx, j * freqDecimation + mirror] = stokesIf(outVarX[l][0], outVarX[l][1], outVarY[l][0], outVarY[l][1])
+						stokesSingleOut_view[timeIdx, j * freqDecimation + l] = stokesIf(outVarX[mirror][0], outVarX[mirror][1], outVarY[mirror][0], outVarY[mirror][1])
 
 					timeIdx = timeIdx + 1
 				else:
@@ -279,7 +310,6 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 		#free(inVar)
 		#fftwf_free(outVar)
 		#
-		printf("End\n")
 		fftwf_destroy_plan(fftPlanX)
 		fftwf_destroy_plan(fftPlanY)
 		fftwf_free(inVarX)
@@ -293,6 +323,7 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 
 	else: 
 		printf("Processing Stoves V...\n")
+		"""
 		for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
 			for i in range(packetCount * scans):
 				iSet = i * 4
@@ -314,3 +345,4 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 		writeDataShrunk(stokesSingleOut_view, dataLength, &outputLoc[0])
 
 		#return (stokesSingleOut,) 
+		"""

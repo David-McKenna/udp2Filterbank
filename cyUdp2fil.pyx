@@ -213,6 +213,8 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 
 
 	# Change the memory from time continuous to beam continuous
+	# Easy optimisation: do this when dealing with the rest of the memory operations
+	# This is simply to make my life easier while creating this script.
 	printf("Restructuring the dataset in memory...\n")
 	cdef long baseOffset, beamletIdx, __
 	for i in prange(packetCount, nogil = True, schedule = 'guided', num_threads = threadCount):
@@ -222,10 +224,11 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 			for k in range(scans):
 				# Filterbank expects the frequency to be reversed compared to input flow
 				kSet = k * 4
-				structuredFileData_view[beamletCount - 1 - j][i * scans + k][0] = fileData[beamletIdx + kSet] # Xr
-				structuredFileData_view[beamletCount - 1 - j][i * scans + k][1] = fileData[beamletIdx + kSet + 1] # Xi
-				structuredFileData_view[beamletCount - 1 - j][i * scans + k][2] = fileData[beamletIdx + kSet + 2] # Yr
-				structuredFileData_view[beamletCount - 1 - j][i * scans + k][3] = fileData[beamletIdx + kSet + 3] # Yi
+				timeIdx = (i * scans + k) / timeDecimation
+				structuredFileData_view[beamletCount - 1 - j][timeIdx][0] += fileData[beamletIdx + kSet] # Xr
+				structuredFileData_view[beamletCount - 1 - j][timeIdx][1] += fileData[beamletIdx + kSet + 1] # Xi
+				structuredFileData_view[beamletCount - 1 - j][timeIdx][2] += fileData[beamletIdx + kSet + 2] # Yr
+				structuredFileData_view[beamletCount - 1 - j][timeIdx][3] += fileData[beamletIdx + kSet + 3] # Yi
 
 	# Release the raw data.
 	free(fileData)
@@ -266,44 +269,50 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 	elif stokesIT:
 		printf("Processing Stokes I...\n")
 
-		#for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
-		for j in range(beamletCount):
-			filterbankIdx = 0
-			filterbankLim = freqDecimation - 1
-			timeIdx = 0
+		if freqDecimation > 1:
+			#for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
+			for j in range(beamletCount):
+				filterbankIdx = 0
+				filterbankLim = freqDecimation - 1
+				timeIdx = 0
 
-			for i in range(packetCount * scans):
-				#Xr = structuredFileData_view[j][i][0]
-				#Xi = structuredFileData_view[j][i][1]
-				#Yr = structuredFileData_view[j][i][2]
-				#Yi = structuredFileData_view[j][i][3]
+				for i in range(timeSteps):
+					#Xr = structuredFileData_view[j][i][0]
+					#Xi = structuredFileData_view[j][i][1]
+					#Yr = structuredFileData_view[j][i][2]
+					#Yi = structuredFileData_view[j][i][3]
 
-				inVarX[filterbankIdx][0] = structuredFileData_view[j][i][0] * hannWindow[filterbankIdx]
-				inVarX[filterbankIdx][1] = structuredFileData_view[j][i][1] * hannWindow[filterbankIdx]
-				inVarY[filterbankIdx][0] = structuredFileData_view[j][i][2] * hannWindow[filterbankIdx]
-				inVarY[filterbankIdx][1] = structuredFileData_view[j][i][3] * hannWindow[filterbankIdx]
-				#stokesSingle_view[j, i] = stokesI(Xr, Xi, Yr, Yi)
+					inVarX[filterbankIdx][0] = structuredFileData_view[j][i][0] * hannWindow[filterbankIdx]
+					inVarX[filterbankIdx][1] = structuredFileData_view[j][i][1] * hannWindow[filterbankIdx]
+					inVarY[filterbankIdx][0] = structuredFileData_view[j][i][2] * hannWindow[filterbankIdx]
+					inVarY[filterbankIdx][1] = structuredFileData_view[j][i][3] * hannWindow[filterbankIdx]
+					#stokesSingle_view[j, i] = stokesI(Xr, Xi, Yr, Yi)
 
-				#inVar[filterbankIdx] = stokesI(Xr, Xi, Yr, Yi)
-				if filterbankIdx == filterbankLim:
-					filterbankIdx = 0
-					#fftwf_execute(fftPlan)
-					fftwf_execute(fftPlanX)
-					fftwf_execute(fftPlanY)
-				
-					#for i in range(fftOffset):
-					#	stokesSingleOut_view[timeIdx, j * freqDecimation + i] = outVar[i][0]
-					#	stokesSingleOut_view[timeIdx, j * freqDecimation + (freqDecimation - 1 - i)] = outVar[i][0]
-					#stokesSingleOut_view[timeIdx, j * freqDecimation + fftOffset] = outVar[fftOffset][0]
+					#inVar[filterbankIdx] = stokesI(Xr, Xi, Yr, Yi)
+					if filterbankIdx == filterbankLim:
+						filterbankIdx = 0
+						#fftwf_execute(fftPlan)
+						fftwf_execute(fftPlanX)
+						fftwf_execute(fftPlanY)
+					
+						#for i in range(fftOffset):
+						#	stokesSingleOut_view[timeIdx, j * freqDecimation + i] = outVar[i][0]
+						#	stokesSingleOut_view[timeIdx, j * freqDecimation + (freqDecimation - 1 - i)] = outVar[i][0]
+						#stokesSingleOut_view[timeIdx, j * freqDecimation + fftOffset] = outVar[fftOffset][0]
 
-					for l in range(fftOffset):
-						mirror = l + fftOffset
-						stokesSingleOut_view[timeIdx, j * freqDecimation + mirror] = stokesIf(outVarX[l][0], outVarX[l][1], outVarY[l][0], outVarY[l][1])
-						stokesSingleOut_view[timeIdx, j * freqDecimation + l] = stokesIf(outVarX[mirror][0], outVarX[mirror][1], outVarY[mirror][0], outVarY[mirror][1])
+						for l in range(fftOffset):
+							mirror = l + fftOffset
+							stokesSingleOut_view[timeIdx, j * freqDecimation + mirror] = stokesIf(outVarX[l][0], outVarX[l][1], outVarY[l][0], outVarY[l][1])
+							stokesSingleOut_view[timeIdx, j * freqDecimation + l] = stokesIf(outVarX[mirror][0], outVarX[mirror][1], outVarY[mirror][0], outVarY[mirror][1])
 
-					timeIdx = timeIdx + 1
-				else:
-					filterbankIdx = filterbankIdx + 1
+						timeIdx = timeIdx + 1
+					else:
+						filterbankIdx = filterbankIdx + 1
+
+		else:
+			for j in range(beamletCount):
+				for i in range(timeSteps):
+					stokesSingleOut_view[i, j] = stokesI(structuredFileData_view[j][i][0], structuredFileData_view[j][i][1], structuredFileData_view[j][i][2], structuredFileData_view[j][i][3])
 
 
 		#fftwf_destroy_plan(fftPlan)
@@ -346,3 +355,4 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 
 		#return (stokesSingleOut,) 
 		"""
+	free(hannWindow)

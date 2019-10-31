@@ -158,6 +158,11 @@ echo ""
 # Prep the output filterbank with a fake header
 echo "Sticking on a SIGPROC header"
 echo""
+
+# Our paths are too long for sigproc to process; cut them down to size a bit, assuming we're on REALTA
+set rawfilepatch = `echo $file | sed "s/\/mnt\///g"`
+set rawfilepatch = `echo $rawfilepatch | sed 's/\_data1//g'`
+
 #get the obs start MJD from the filename for the header
 set tmpstr=`python /home/obs/Joe/realta_scripts/dump_filetime_mjd.py -infile $file | grep MJD:`
 set MJD=`echo $tmpstr | grep -o -E '[0-9.]+'`
@@ -166,6 +171,7 @@ set nchan = `echo 122 $fftWindow | awk '{print $1*$2}'`
 set tsamp = `echo 0.00000512 $fftWindow $timeWindow | awk '{print $1 * $2 * $3}'`
 set npols = `echo $stokesI $stokesV | awk '{print $1 +$2 }'`
 
+echo "Patched File Name = "$rawfilepatch
 echo "Obs. MJD =  "$MJD
 echo "Top channel: "$fch1"MHz"
 echo "Channel Width: "$fo"MHz"
@@ -176,7 +182,8 @@ echo ""
 
 
 if ( $ra == 0 ) then
-    /home/obs/Joe/realta_scripts/mockHeader/mockHeader -raw $file -tel $tel -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits 32 -tstart $MJD -nifs $npols -source $psrName headerfile_341
+#    /home/obs/Joe/realta_scripts/mockHeader/mockHeader -tel $tel -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits 32 -tstart $MJD -nifs $npols -source $psrName headerfile_341
+    /home/obs/Joe/realta_scripts/mockHeader/mockHeader -raw $rawfilepatch -tel $tel -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits 32 -tstart $MJD -nifs $npols -source $psrName headerfile_341
 #    /home/obs/Joe/realta_scripts/mockHeader/mockHeader -tel $tel -tsamp 0.00000512 -fch1 $fch1 -fo -0.01220703125 -nchans 1952 -nifs 1 -nbits 32 -tstart $MJD headerfile_341
 else
     /home/obs/Joe/realta_scripts/mockHeader/mockHeader -raw $file -tel $tel -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits 32 -tstart $MJD -nifs $npols -ra $ra -dec $dec -source $psrName headerfile_341

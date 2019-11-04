@@ -322,12 +322,11 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 
 		timeSteps /= freqDecimation
 		if timeDecimation > 1:
-			assert(timeDecimation < (timeSteps // )
 			for j in range(beamletCount):
 				timeIdx = 0
 				combinedSteps = 1
 				for i in range(timeSteps):
-					stokesSingleOut_view[timeIdx, j] += stokesSingle_view[i, j]
+					stokesSingleOut_view[timeIdx, j] = stokesSingleOut_view[timeIdx, j] + stokesSingle_view[i, j]
 
 					if combinedSteps == timeDecimation:
 						combinedSteps = 1 

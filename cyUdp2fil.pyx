@@ -156,7 +156,7 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 	# Initialise all variables.
 	cdef unsigned char Xr, Xi, Yr, Yi
 
-	cdef int j, k, kSet, l
+	cdef int j, k, kSet, l, offsetidx, idx1, idx2
 	cdef int beamletCount = 122
 	cdef int scans = 16
 	cdef int filterbankIdx = 0
@@ -298,9 +298,11 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 
 						#AFTER TIMKE DEUBGGING: needs to be reversed?
 						for l in range(fftOffset):
-							mirror = l + fftOffset
-							stokesSingle_view[timeIdx, j * freqDecimation + mirror] = stokesIf(outVarX[l][0], outVarX[l][1], outVarY[l][0], outVarY[l][1])
-							stokesSingle_view[timeIdx, j * freqDecimation + l] = stokesIf(outVarX[mirror][0], outVarX[mirror][1], outVarY[mirror][0], outVarY[mirror][1])
+							offsetIdx = l + fftOffset
+							idx1 = fftOffset - 1 - l
+							idx2 = freqDecimation - 1 - l
+							stokesSingle_view[timeIdx, j * freqDecimation + l] = stokesIf(outVarX[idx1][0], outVarX[idx1][1], outVarY[idx1][0], outVarY[idx1][1])
+							stokesSingle_view[timeIdx, j * freqDecimation + offsetIdx] = stokesIf(outVarX[idx2][0], outVarX[idx2][1], outVarY[idx2][0], outVarY[idx2][1])
 						
 
 						timeIdx = timeIdx + 1

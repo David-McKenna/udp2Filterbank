@@ -27,7 +27,7 @@
 #   frequency tradeoffs for dealing with shorter period / higher DM pulsars.
 
 if ($#argv < 6) then
-    echo "Usage: csh bf2fil.csh [pcap_filename] [npackets] [mode] [ram_factor] [fch1] [output_filename] (optional parameters are [stokesI (0/1)] [stokesV (0/1)] [time_averaging_length] [frequency_FFT_window] [pulsar name] [RA](J2000, format hh:mm:ss.ddd) [DEC] (J2000, format dd.mm.ss.ddd))"
+    echo "\033[1;33mUsage:\033[0m csh bf2fil.csh [pcap_filename] [npackets] [mode] [ram_factor] [fch1] [output_filename] (optional parameters are [stokesI (0/1)] [stokesV (0/1)] [time_averaging_length] [frequency_FFT_window] [pulsar name] [RA](J2000, format hh:mm:ss.ddd) [DEC] (J2000, format dd.mm.ss.ddd))"
     goto marbh
 endif
 
@@ -46,7 +46,7 @@ if ( $#argv > 6 ) then
 
     if ( $stokesI == $stokesV ) then
         if ( $stokesI == 0 ) then
-            echo "You have to get some kind of Stokes output..."
+            echo "\033[5;31mERROR: You have to get some kind of Stokes output...\033[0m"
             goto marbh
         endif
     endif
@@ -89,7 +89,7 @@ set tel = 11 # LOFAR in PRESTO/Sigproc.
 
 # Exit if the output file exists
 if ( -f $outfile ) then
-    echo "Output file "$outfile" already exists, exiting before we overwrite any data."
+    echo "\033[5;41mOutput file "$outfile" already exists, exiting before we overwrite any data.\033[0m"
     goto marbh
 endif
 
@@ -99,7 +99,7 @@ endif
 set host = `uname`
 echo $host
 if ($host == "Darwin") then       # We're on a Mac
-    echo '2019-10 Changes: Compatibility has not been tested, attempting to continue...'
+    echo '\033[5;43m2019-10 Changes: Compatibility has not been tested, attempting to continue...\033[0m'
     set nprocessors = `sysctl -n hw.physicalcpu`
 else if ($host == "Linux") then   # We're on a Linux
     set nprocessors = `nproc`

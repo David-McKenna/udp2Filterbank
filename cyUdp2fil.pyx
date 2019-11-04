@@ -202,6 +202,7 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 	cdef DTYPE_t_2[:, :, ::1] stokesDualOut_view = stokesDualOut
 
 
+
 	# Initialise FFTW, WARNING, THIS IS NOT THREAD SAFE, DO NOT ATTEMPT TO OMP/PRANGE YOUR WAY TO PARALLELISM AGAIN
 	cdef fftwf_complex* inVarX = <fftwf_complex*> fftwf_malloc(sizeof(fftwf_complex) * freqDecimation);
 	cdef fftwf_complex* outVarX = <fftwf_complex*> fftwf_malloc(sizeof(fftwf_complex) * freqDecimation);
@@ -226,7 +227,7 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 			for k in range(scans):
 				# Filterbank expects the frequency to be reversed compared to input flow
 				kSet = k * 4
-				timeIdx = (i * scans + k) / timeDecimation
+				timeIdx = i * scans + k
 				structuredFileData_view[beamletCount - 1 - j][timeIdx][0] += fileData[beamletIdx + kSet] # Xr
 				structuredFileData_view[beamletCount - 1 - j][timeIdx][1] += fileData[beamletIdx + kSet + 1] # Xi
 				structuredFileData_view[beamletCount - 1 - j][timeIdx][2] += fileData[beamletIdx + kSet + 2] # Yr
@@ -288,27 +289,19 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 					inVarX[filterbankIdx][1] = structuredFileData_view[j][i][1] * hannWindow[filterbankIdx]
 					inVarY[filterbankIdx][0] = structuredFileData_view[j][i][2] * hannWindow[filterbankIdx]
 					inVarY[filterbankIdx][1] = structuredFileData_view[j][i][3] * hannWindow[filterbankIdx]
-					#stokesSingle_view[j, i] = stokesI(Xr, Xi, Yr, Yi)
 
-					#inVar[filterbankIdx] = stokesI(Xr, Xi, Yr, Yi)
 					if filterbankIdx == filterbankLim:
 						filterbankIdx = 0
-						#fftwf_execute(fftPlan)
 						fftwf_execute(fftPlanX)
 						fftwf_execute(fftPlanY)
-					
-						#for i in range(fftOffset):
-						#	stokesSingleOut_view[timeIdx, j * freqDecimation + i] = outVar[i][0]
-						#	stokesSingleOut_view[timeIdx, j * freqDecimation + (freqDecimation - 1 - i)] = outVar[i][0]
-						#stokesSingleOut_view[timeIdx, j * freqDecimation + fftOffset] = outVar[fftOffset][0]
 
+
+						#AFTER TIMKE DEUBGGING: needs to be reversed?
 						for l in range(fftOffset):
 							mirror = l + fftOffset
 							stokesSingle_view[timeIdx, j * freqDecimation + mirror] = stokesIf(outVarX[l][0], outVarX[l][1], outVarY[l][0], outVarY[l][1])
 							stokesSingle_view[timeIdx, j * freqDecimation + l] = stokesIf(outVarX[mirror][0], outVarX[mirror][1], outVarY[mirror][0], outVarY[mirror][1])
 						
-						#for l in range(freqDecimation):
-							#stokesSingleOut_view[timeIdx, j * freqDecimation + l] = stokesIf(outVarX[l][0], outVarX[l][1], outVarY[l][0], outVarY[l][1])
 
 						timeIdx = timeIdx + 1
 					else:
@@ -333,6 +326,7 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 						timeIdx += 1
 					else:
 						combinedSteps += 1
+
 		else:
 			stokesSingleOut_view = stokesSingle_view
 

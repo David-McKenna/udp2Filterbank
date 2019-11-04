@@ -171,7 +171,7 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 	cdef long udpPacketLength = 7824
 	cdef long udpHeaderLength = 16
 	cdef long timeIdx = 0
-	cdef long timeSteps = packetCount * scans // timeDecimation
+	cdef long timeSteps = packetCount * scans
 
 	cdef long long dataLength = int(packetCount * (beamletCount) * (scans / timeDecimation) * (stokesIT + stokesVT)) # freqDecimation has a 1:1 transfer between time/freq, so no effect on output size.
 
@@ -183,13 +183,13 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 	structuredFileData = np.zeros((beamletCount, packetCount * scans,  4), dtype = DTYPE_1)
 
 	if stokesVT + stokesIT == 1:
-		stokesSingleData = np.zeros((beamletCount, packetCount * scans), dtype = DTYPE_2)
+		stokesSingleData = np.zeros((packetCount * scans // freqDecimation, beamletCount * freqDecimation), dtype = DTYPE_2)
 		stokesSingleOut = np.zeros((packetCount * scans // timeDecimation // freqDecimation, beamletCount * freqDecimation), dtype = DTYPE_2)
 
 		stokesDualData = np.zeros((1,1,1), dtype = DTYPE_2)
 		stokesDualOut = np.zeros((1,1,1), dtype = DTYPE_2)
 	else:
-		stokesDualData = np.zeros((beamletCount, 2, packetCount * scans), dtype = DTYPE_2)
+		stokesDualData = np.zeros((packetCount * scans // freqDecimation, 2, beamletCount * freqDecimation), dtype = DTYPE_2)
 		stokesDualOut = np.zeros((packetCount * scans // timeDecimation // freqDecimation, 2, beamletCount * freqDecimation), dtype = DTYPE_2)
 
 		stokesSingleData = np.zeros((1,1), dtype = DTYPE_2)
@@ -216,8 +216,10 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 	# Easy optimisation: do this when dealing with the rest of the memory operations
 	# This is simply to make my life easier while creating this script.
 	printf("Restructuring the dataset in memory...\n")
+
 	cdef long baseOffset, beamletIdx, __
 	for i in prange(packetCount, nogil = True, schedule = 'guided', num_threads = threadCount):
+	#for i in range(packetCount):
 		baseOffset = udpPacketLength * i + udpHeaderLength
 		for j in range(beamletCount):
 			beamletIdx = baseOffset + j * scans * 4
@@ -302,8 +304,11 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 
 						for l in range(fftOffset):
 							mirror = l + fftOffset
-							stokesSingleOut_view[timeIdx, j * freqDecimation + mirror] = stokesIf(outVarX[l][0], outVarX[l][1], outVarY[l][0], outVarY[l][1])
-							stokesSingleOut_view[timeIdx, j * freqDecimation + l] = stokesIf(outVarX[mirror][0], outVarX[mirror][1], outVarY[mirror][0], outVarY[mirror][1])
+							stokesSingle_view[timeIdx, j * freqDecimation + mirror] = stokesIf(outVarX[l][0], outVarX[l][1], outVarY[l][0], outVarY[l][1])
+							stokesSingle_view[timeIdx, j * freqDecimation + l] = stokesIf(outVarX[mirror][0], outVarX[mirror][1], outVarY[mirror][0], outVarY[mirror][1])
+						
+						#for l in range(freqDecimation):
+							#stokesSingleOut_view[timeIdx, j * freqDecimation + l] = stokesIf(outVarX[l][0], outVarX[l][1], outVarY[l][0], outVarY[l][1])
 
 						timeIdx = timeIdx + 1
 					else:
@@ -312,8 +317,25 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 		else:
 			for j in range(beamletCount):
 				for i in range(timeSteps):
-					stokesSingleOut_view[i, j] = stokesI(structuredFileData_view[j][i][0], structuredFileData_view[j][i][1], structuredFileData_view[j][i][2], structuredFileData_view[j][i][3])
+					stokesSingle_view[i, j] = stokesI(structuredFileData_view[j][i][0], structuredFileData_view[j][i][1], structuredFileData_view[j][i][2], structuredFileData_view[j][i][3])
 
+
+		timeSteps /= freqDecimation
+		if timeDecimation > 1:
+			assert(timeDecimation < (timeSteps // )
+			for j in range(beamletCount):
+				timeIdx = 0
+				combinedSteps = 1
+				for i in range(timeSteps):
+					stokesSingleOut_view[timeIdx, j] += stokesSingle_view[i, j]
+
+					if combinedSteps == timeDecimation:
+						combinedSteps = 1 
+						timeIdx += 1
+					else:
+						combinedSteps += 1
+		else:
+			stokesSingleOut_view = stokesSingle_view
 
 		#fftwf_destroy_plan(fftPlan)
 		#free(inVar)

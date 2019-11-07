@@ -188,6 +188,11 @@ if ( $ra == 0 ) then
 else
     /home/obs/Joe/realta_scripts/mockHeader/mockHeader -raw $file -tel $tel -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits 32 -tstart $MJD -nifs $npols -ra $ra -dec $dec -source $psrName headerfile_341
 endif
+
+if ( "$outfile" =~ */* ) then
+    mkdir -p "`dirname $outfile`"
+endif
+
 cat headerfile_341 >> $outfile
 
 

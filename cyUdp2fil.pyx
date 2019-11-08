@@ -1,5 +1,5 @@
 # distutils: extra_compile_args = -fopenmp -O3 -march=native
-# distutils: extra_link_args = -fopenmp -lfftw3f
+# distutils: extra_link_args = -fopenmp -lfftw3f_threads
 # cython: language_level=3
 # cython: embedsignature=False
 # cython: boundscheck=False
@@ -33,6 +33,10 @@ ctypedef np.float32_t DTYPE_t_2
 
 # Import fftw3 functions (fftw3f for floating point precision)
 cdef extern from "fftw3.h" nogil:
+	cdef int fftwf_init_threads();
+	cdef void fftwf_plan_with_nthreads(int nthreads)
+	cdef void fftwf_cleanup_threads();
+
 	ctypedef DTYPE_t_2 fftwf_complex[2]
 	ctypedef struct fftwf_plan:
 		pass
@@ -46,7 +50,7 @@ cdef extern from "fftw3.h" nogil:
 
 	cdef int fftw_import_wisdom_from_filename(const char *filename)
 
-
+fftwf_init_threads()
 
 
 # Define our stokes functions for different forms / precisions
@@ -58,6 +62,9 @@ cdef DTYPE_t_2 stokesIf(DTYPE_t_2 Xr, DTYPE_t_2 Xi, DTYPE_t_2 Yr, DTYPE_t_2 Yi) 
 
 
 cdef DTYPE_t_2 stokesV(unsigned char Xr, unsigned char Xi, unsigned char Yr, unsigned char Yi) nogil:
+	return <DTYPE_t_2> (2 * ((Xr * Yi) + (-1 * Xi * Yr)))
+
+cdef DTYPE_t_2 stokesVf(DTYPE_t_2 Xr, DTYPE_t_2 Xi, DTYPE_t_2 Yr, DTYPE_t_2 Yi) nogil:
 	return <DTYPE_t_2> (2 * ((Xr * Yi) + (-1 * Xi * Yr)))
 
 
@@ -73,14 +80,13 @@ cdef void writeDataShrunk(DTYPE_t_2[:, ::1] dataSet, long long dataLength, char 
 	else:
 		printf("ERROR: UNABLE TO OPEN OUTFPUT FILE; EXITING")
 
-cdef void writeData(DTYPE_t_2[:, :, ::1] dataSet, long long dataLength, char outputLoc[]) nogil:
-	printf("Writing %lld output elements to %s\n", dataLength, outputLoc)
-	cdef FILE *outRef = fopen(outputLoc, 'a')
-	if (outRef != NULL):
-		fwrite(&dataSet[0,0,0], sizeof(DTYPE_t_2), dataLength, outRef) # Write as little endian, C order (last axis first)
-		fclose(outRef)
-	else:
-		printf("ERROR: UNABLE TO OPEN OUTFPUT FILE; EXITING")
+cdef void writeData(DTYPE_t_2[:, :, ::1] dataSet, long long dataLength, char outputLoc[], char outputLoc2[]) nogil:
+	printf("Passing Stokes I data to writer...\n")
+	writeDataShrunk(dataSet[0], dataLength / 2, outputLoc)
+
+	printf("Passing Stokes V data to writer...\n")
+	writeDataShrunk(dataSet[1], dataLength / 2, outputLoc2)
+
 
 
 
@@ -118,9 +124,9 @@ cpdef void readFile(char* fileLoc, int threadCount, long long readStart, long lo
 
 		# Handle the case where we are asked to read beyond the EOF
 		if readLength > charSize - readStart:
-			printf("ERROR: File is %lld bytes long but you want to read %lld bytes from %lld.", charSize, readLength, readStart)
+			printf("ERROR: File is %lld bytes long but you want to read %lld bytes from %lld.\n", charSize, readLength, readStart)
 			charSize = charSize - readStart
-			printf("ERROR: READ LENGTH TOO LONG\nERROR: Changing read length to EOF after %lld bytes", charSize)
+			printf("ERROR: READ LENGTH TOO LONG\nERROR: Changing read length to EOF after %lld bytes\n", charSize)
 		else:
 			charSize = readLength
 
@@ -142,21 +148,32 @@ cpdef void readFile(char* fileLoc, int threadCount, long long readStart, long lo
 
 	# Assume our output location is less than 1k characters long...
 	cdef char[1000] outputF
+	cdef char[1000] outputF2
+
 	if outputLoc == b"":
-		sprintf(outputF, "%s.tmp", fileLoc)
+		if stokesIT and stokesVT:
+			sprintf(outputF, "%s_stokesI.fil.tmp", fileLoc)
+			sprintf(outputF2, "%s_stokesV.fil.tmp", fileLoc)
+		else:
+			sprintf(outputF, "%s.tmp", fileLoc)	
 	else:
-		sprintf(outputF, "%s", outputLoc)
+		if stokesIT and stokesVT:
+			sprintf(outputF, "%s_stokesI.fil", outputLoc)
+			sprintf(outputF2, "%s_stokesV.fil", outputLoc)
+		else:
+			sprintf(outputF, "%s", outputLoc)
+
 
 	# fileData is free'd in this function
-	processData(fileData, threadCount, packetCount, stokesIT, stokesVT, timeDecimation, freqDecimation, outputF)
+	processData(fileData, threadCount, packetCount, stokesIT, stokesVT, timeDecimation, freqDecimation, outputF, outputF2)
 
 #cdef tuple processData(DTYPE_t_1* fileData, long packetCount, unsigned char stokesIT, unsigned char stokesVT, int timeDecimation, int freqDecimation, char* outputLoc):
-cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, unsigned char stokesIT, unsigned char stokesVT, int timeDecimation, int freqDecimation, char* outputLoc):
+cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, unsigned char stokesIT, unsigned char stokesVT, int timeDecimation, int freqDecimation, char* outputLoc, char* outputLoc2):
 
 	# Initialise all variables.
 	cdef unsigned char Xr, Xi, Yr, Yi
 
-	cdef int j, k, kSet, l, offsetidx, idx1, idx2
+	cdef int j, k, kSet, l, offsetIdx, idx1, idx2, combinedSteps
 	cdef int beamletCount = 122
 	cdef int scans = 16
 	cdef int filterbankIdx = 0
@@ -166,6 +183,8 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 
 	cdef DTYPE_t_2 *hannWindow = <DTYPE_t_2*>malloc(sizeof(DTYPE_t_2) * freqDecimation)
 	cdef DTYPE_t_2 pi = np.pi
+
+	cdef func 
 
 	cdef long i, iSet
 	cdef long udpPacketLength = 7824
@@ -189,8 +208,8 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 		stokesDualData = np.zeros((1,1,1), dtype = DTYPE_2)
 		stokesDualOut = np.zeros((1,1,1), dtype = DTYPE_2)
 	else:
-		stokesDualData = np.zeros((packetCount * scans // freqDecimation, 2, beamletCount * freqDecimation), dtype = DTYPE_2)
-		stokesDualOut = np.zeros((packetCount * scans // timeDecimation // freqDecimation, 2, beamletCount * freqDecimation), dtype = DTYPE_2)
+		stokesDualData = np.zeros((2, packetCount * scans // freqDecimation, beamletCount * freqDecimation), dtype = DTYPE_2)
+		stokesDualOut = np.zeros((2, packetCount * scans // timeDecimation // freqDecimation, beamletCount * freqDecimation), dtype = DTYPE_2)
 
 		stokesSingleData = np.zeros((1,1), dtype = DTYPE_2)
 		stokesSingleOut = np.zeros((1,1), dtype = DTYPE_2)
@@ -204,14 +223,41 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 
 
 	# Initialise FFTW, WARNING, THIS IS NOT THREAD SAFE, DO NOT ATTEMPT TO OMP/PRANGE YOUR WAY TO PARALLELISM AGAIN
-	cdef fftwf_complex* inVarX = <fftwf_complex*> fftwf_malloc(sizeof(fftwf_complex) * freqDecimation);
-	cdef fftwf_complex* outVarX = <fftwf_complex*> fftwf_malloc(sizeof(fftwf_complex) * freqDecimation);
-	cdef fftwf_plan fftPlanX = fftwf_plan_dft_1d(freqDecimation, inVarX, outVarX, -1, FFTW_ESTIMATE)
+	if freqDecimation > 1:
+		fftwf_plan_with_nthreads(threadCount)
 
-	cdef fftwf_complex* inVarY = <fftwf_complex*> fftwf_malloc(sizeof(fftwf_complex) * freqDecimation);
-	cdef fftwf_complex* outVarY = <fftwf_complex*> fftwf_malloc(sizeof(fftwf_complex) * freqDecimation);
+	cdef fftwf_complex **inVarXArr = <fftwf_complex**>malloc(beamletCount * sizeof(fftwf_complex *))
+	cdef fftwf_complex **outVarXArr = <fftwf_complex**>malloc(beamletCount * sizeof(fftwf_complex *))
+	cdef fftwf_plan *fftPlanXArr = <fftwf_plan*>malloc(beamletCount * sizeof(fftwf_plan *))
+
+	for i in range(beamletCount):
+		inVarXArr[i] = <fftwf_complex*> fftwf_malloc(sizeof(fftwf_complex) * freqDecimation);
+		outVarXArr[i] = <fftwf_complex*> fftwf_malloc(sizeof(fftwf_complex) * freqDecimation);
+		fftPlanXArr[i] =  <fftwf_plan>fftwf_plan_dft_1d(freqDecimation, inVarXArr[i], outVarXArr[i], -1, FFTW_ESTIMATE)
+
+
+	cdef fftwf_complex **inVarYArr = <fftwf_complex**>malloc(beamletCount * sizeof(fftwf_complex *))
+	cdef fftwf_complex **outVarYArr =<fftwf_complex**> malloc(beamletCount * sizeof(fftwf_complex *))
+	cdef fftwf_plan *fftPlanYArr =  <fftwf_plan*>malloc(beamletCount * sizeof(fftwf_plan *))
+
+	for i in range(beamletCount):
+		inVarYArr[i] = <fftwf_complex*> fftwf_malloc(sizeof(fftwf_complex) * freqDecimation);
+		outVarYArr[i] = <fftwf_complex*> fftwf_malloc(sizeof(fftwf_complex) * freqDecimation);
+		fftPlanYArr[i] = <fftwf_plan>fftwf_plan_dft_1d(freqDecimation, inVarYArr[i], outVarYArr[i], -1, FFTW_ESTIMATE)
+
+
+	cdef fftwf_complex *inVarX
+	cdef fftwf_complex *outVarX
+	cdef fftwf_plan fftPlanX
+
+	cdef fftwf_complex *inVarY
+	cdef fftwf_complex *outVarY
+	cdef fftwf_plan fftPlanY
+	"""
+	cdef fftwf_complex *inVarY = <fftwf_complex*> fftwf_malloc(sizeof(fftwf_complex) * freqDecimation);
+	cdef fftwf_complex *outVarY = <fftwf_complex*> fftwf_malloc(sizeof(fftwf_complex) * freqDecimation);
 	cdef fftwf_plan fftPlanY = fftwf_plan_dft_1d(freqDecimation, inVarY, outVarY, -1, FFTW_ESTIMATE)
-
+	"""
 
 	# Change the memory from time continuous to beam continuous
 	# Easy optimisation: do this when dealing with the rest of the memory operations
@@ -242,42 +288,23 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 		hannWindow[i] = pow(sin(pi * i / freqDecimation), 2)
 
 	if stokesVT and stokesIT:
-		printf("Processing Stoves I and Stokes V...\n")
-		"""
-		for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
-			for i in range(packetCount * scans):
-				Xr = structuredFileData_view[j][i][0]
-				Xi = structuredFileData_view[j][i][1]
-				Yr = structuredFileData_view[j][i][2]
-				Yi = structuredFileData_view[j][i][3]
+		printf("Processing StoKes I and Stokes V...\n")
 
-				stokesDual_view[j, 0, i] = stokesI(Xr, Xi, Yr, Yi)
-				stokesDual_view[j, 1, i] = stokesV(Xr, Xi, Yr, Yi)
-
-		printf("Stokes I and V formed, performing decimations...\n")
-		for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
-			for timeIdx in range(timeSteps):
-				holdVar = 0
-				holdVar2 = 0
-				for k in range(timeDecimation):
-					holdVar = holdVar + stokesDual_view[j, 0, timeIdx * timeDecimation + k]
-					holdVar2 = holdVar2 + stokesDual_view[j, 1, timeIdx * timeDecimation + k]
-				stokesDualOut_view[timeIdx, 0, j] = holdVar
-				stokesDualOut_view[timeIdx, 1, j] = holdVar2
-
-		writeData(stokesDualOut_view, dataLength, &outputLoc[0])
-
-		#return(stokesDualOut,)
-		"""
-	elif stokesIT:
-		printf("Processing Stokes I...\n")
 
 		if freqDecimation > 1:
-			#for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
-			for j in range(beamletCount):
+			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
+			#for j in range(beamletCount):
 				filterbankIdx = 0
 				filterbankLim = freqDecimation - 1
 				timeIdx = 0
+
+				inVarX = inVarXArr[j]
+				inVarY = inVarYArr[j]
+				outVarX = outVarXArr[j]
+				outVarY = outVarYArr[j]
+				fftPlanX = fftPlanXArr[j]
+				fftPlanY = fftPlanYArr[j]
+
 
 				for i in range(timeSteps):
 					#Xr = structuredFileData_view[j][i][0]
@@ -295,81 +322,149 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 						fftwf_execute(fftPlanX)
 						fftwf_execute(fftPlanY)
 
-
-						#AFTER TIMKE DEUBGGING: needs to be reversed?
 						for l in range(fftOffset):
 							offsetIdx = l + fftOffset
 							idx1 = fftOffset - 1 - l
 							idx2 = freqDecimation - 1 - l
-							stokesSingle_view[timeIdx, j * freqDecimation + l] = stokesIf(outVarX[idx1][0], outVarX[idx1][1], outVarY[idx1][0], outVarY[idx1][1])
-							stokesSingle_view[timeIdx, j * freqDecimation + offsetIdx] = stokesIf(outVarX[idx2][0], outVarX[idx2][1], outVarY[idx2][0], outVarY[idx2][1])
+							stokesDual_view[0][timeIdx][j * freqDecimation + l] = stokesIf(outVarX[idx1][0], outVarX[idx1][1], outVarY[idx1][0], outVarY[idx1][1])
+							stokesDual_view[0][timeIdx][j * freqDecimation + offsetIdx] = stokesIf(outVarX[idx2][0], outVarX[idx2][1], outVarY[idx2][0], outVarY[idx2][1])
+							stokesDual_view[1][timeIdx][j * freqDecimation + l] = stokesVf(outVarX[idx1][0], outVarX[idx1][1], outVarY[idx1][0], outVarY[idx1][1])
+							stokesDual_view[1][timeIdx][j * freqDecimation + offsetIdx] = stokesVf(outVarX[idx2][0], outVarX[idx2][1], outVarY[idx2][0], outVarY[idx2][1])
 						
 
 						timeIdx = timeIdx + 1
 					else:
 						filterbankIdx = filterbankIdx + 1
 
+				fftwf_destroy_plan(fftPlanX)
+				fftwf_destroy_plan(fftPlanY)
+				fftwf_free(inVarX)
+				fftwf_free(inVarY)
+				fftwf_free(outVarX)
+				fftwf_free(outVarY)
+
 		else:
-			for j in range(beamletCount):
+			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
+			#for j in range(beamletCount):
 				for i in range(timeSteps):
-					stokesSingle_view[i, j] = stokesI(structuredFileData_view[j][i][0], structuredFileData_view[j][i][1], structuredFileData_view[j][i][2], structuredFileData_view[j][i][3])
+					stokesDual_view[0][i][j] = stokesI(structuredFileData_view[j][i][0], structuredFileData_view[j][i][1], structuredFileData_view[j][i][2], structuredFileData_view[j][i][3])
+					stokesDual_view[1][i][j] = stokesV(structuredFileData_view[j][i][0], structuredFileData_view[j][i][1], structuredFileData_view[j][i][2], structuredFileData_view[j][i][3])
 
 
 		timeSteps /= freqDecimation
 		if timeDecimation > 1:
-			for j in range(beamletCount):
+			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
+			#for j in range(beamletCount):
 				timeIdx = 0
 				combinedSteps = 1
 				for i in range(timeSteps):
-					stokesSingleOut_view[timeIdx, j] = stokesSingleOut_view[timeIdx, j] + stokesSingle_view[i, j]
+					stokesDualOut_view[0][timeIdx][j] = stokesDualOut_view[0][timeIdx][j] + stokesDual_view[0][i][j]
+					stokesDualOut_view[1][timeIdx][j] = stokesDualOut_view[1][timeIdx][j] + stokesDual_view[1][i][j]
 
 					if combinedSteps == timeDecimation:
 						combinedSteps = 1 
-						timeIdx += 1
+						timeIdx = timeIdx + 1
 					else:
-						combinedSteps += 1
+						combinedSteps = combinedSteps + 1
+
+		else:
+			stokesDualOut_view = stokesDual_view
+
+		writeData(stokesDualOut_view, dataLength, &outputLoc[0], &outputLoc2[0])
+
+	else:
+
+		if stokesIT:
+			stokesFunc = stokesI
+			stokesFFunc = stokesIf
+			printf("Processing Stokes I...\n")
+		elif stokesVT:
+			stokesFunc = stokesV
+			stokesFFunc = stokesVf
+			printf("Processing Stokes V...\n")
+		else:
+			printf("No Stokes Method Selected; exiting.")
+			return
+
+		if freqDecimation > 1:
+			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
+			#for j in range(beamletCount):
+				filterbankIdx = 0
+				filterbankLim = freqDecimation - 1
+				timeIdx = 0
+
+				inVarX = inVarXArr[j]
+				inVarY = inVarYArr[j]
+				outVarX = outVarXArr[j]
+				outVarY = outVarYArr[j]
+				fftPlanX = fftPlanXArr[j]
+				fftPlanY = fftPlanYArr[j]
+
+				for i in range(timeSteps):
+					#Xr = structuredFileData_view[j][i][0]
+					#Xi = structuredFileData_view[j][i][1]
+					#Yr = structuredFileData_view[j][i][2]
+					#Yi = structuredFileData_view[j][i][3]
+
+					inVarX[filterbankIdx][0] = structuredFileData_view[j][i][0] * hannWindow[filterbankIdx]
+					inVarX[filterbankIdx][1] = structuredFileData_view[j][i][1] * hannWindow[filterbankIdx]
+					inVarY[filterbankIdx][0] = structuredFileData_view[j][i][2] * hannWindow[filterbankIdx]
+					inVarY[filterbankIdx][1] = structuredFileData_view[j][i][3] * hannWindow[filterbankIdx]
+
+					if filterbankIdx == filterbankLim:
+						filterbankIdx = 0
+						fftwf_execute(fftPlanX)
+						fftwf_execute(fftPlanY)
+
+						for l in range(fftOffset):
+							offsetIdx = l + fftOffset
+							idx1 = fftOffset - 1 - l
+							idx2 = freqDecimation - 1 - l
+							stokesSingle_view[timeIdx][j * freqDecimation + l] = stokesFFunc(outVarX[idx1][0], outVarX[idx1][1], outVarY[idx1][0], outVarY[idx1][1])
+							stokesSingle_view[timeIdx][j * freqDecimation + offsetIdx] = stokesFFunc(outVarX[idx2][0], outVarX[idx2][1], outVarY[idx2][0], outVarY[idx2][1])
+						
+
+						timeIdx = timeIdx + 1
+					else:
+						filterbankIdx = filterbankIdx + 1
+
+
+				fftwf_destroy_plan(fftPlanX)
+				fftwf_destroy_plan(fftPlanY)
+				fftwf_free(inVarX)
+				fftwf_free(inVarY)
+				fftwf_free(outVarX)
+				fftwf_free(outVarY)
+
+
+		else:
+			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
+			#for j in range(beamletCount):
+				for i in range(timeSteps):
+					stokesSingle_view[i][j] = stokesFunc(structuredFileData_view[j][i][0], structuredFileData_view[j][i][1], structuredFileData_view[j][i][2], structuredFileData_view[j][i][3])
+
+
+		timeSteps /= freqDecimation
+		if timeDecimation > 1:
+			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
+			#for j in range(beamletCount):
+				timeIdx = 0
+				combinedSteps = 1
+				for i in range(timeSteps):
+					stokesSingleOut_view[timeIdx][j] = stokesSingleOut_view[timeIdx][j] + stokesSingle_view[i][j]
+
+					if combinedSteps == timeDecimation:
+						combinedSteps = 1 
+						timeIdx = timeIdx + 1
+					else:
+						combinedSteps = combinedSteps + 1
 
 		else:
 			stokesSingleOut_view = stokesSingle_view
 
-		#fftwf_destroy_plan(fftPlan)
-		#free(inVar)
-		#fftwf_free(outVar)
-		#
-		fftwf_destroy_plan(fftPlanX)
-		fftwf_destroy_plan(fftPlanY)
-		fftwf_free(inVarX)
-		fftwf_free(inVarY)
-		fftwf_free(outVarX)
-		fftwf_free(outVarY)
-
 		writeDataShrunk(stokesSingleOut_view, dataLength, &outputLoc[0])
 
-		#return (stokesSingleOut,)
 
-	else: 
-		printf("Processing Stoves V...\n")
-		"""
-		for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
-			for i in range(packetCount * scans):
-				iSet = i * 4
-				Xr = structuredFileData_view[j][i][0]
-				Xi = structuredFileData_view[j][i][1]
-				Yr = structuredFileData_view[j][i][2]
-				Yi = structuredFileData_view[j][i][3]
 
-				stokesSingle_view[j, i] = stokesV(Xr, Xi, Yr, Yi)
-
-		printf("Stokes V formed, performing decimations...\n")
-		for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
-			for timeIdx in range(timeSteps):
-				holdVar = 0
-				for k in range(timeDecimation):
-					holdVar = holdVar + stokesSingle_view[j, timeIdx * timeDecimation + k]
-				stokesSingleOut_view[timeIdx, j] = holdVar
-
-		writeDataShrunk(stokesSingleOut_view, dataLength, &outputLoc[0])
-
-		#return (stokesSingleOut,) 
-		"""
+	fftwf_cleanup_threads()
 	free(hannWindow)

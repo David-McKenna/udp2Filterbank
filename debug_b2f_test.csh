@@ -40,6 +40,10 @@ set ram_factor = $argv[4] # Set some kind of arbitrary nice-ness factor (sets wh
 set fch1       = $argv[5] # set the frequency of the top channel
 set outfile    = $argv[6]
 
+echo "Parsing: "$file
+echo "Total Packets: "$npackets
+echo "Obs Mode: "$mode
+
 if ( $#argv > 6 ) then
     set stokesI = $argv[7]
     set stokesV = $argv[8]
@@ -206,5 +210,4 @@ end
 
 marbh:
 exit
-
 

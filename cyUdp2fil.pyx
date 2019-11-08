@@ -33,24 +33,24 @@ ctypedef np.float32_t DTYPE_t_2
 
 # Import fftw3 functions (fftw3f for floating point precision)
 cdef extern from "fftw3.h" nogil:
-	cdef int fftwf_init_threads();
-	cdef void fftwf_plan_with_nthreads(int nthreads)
-	cdef void fftwf_cleanup_threads();
+	cdef int fftwf_threads_init_threads();
+	cdef void fftwf_threads_plan_with_nthreads(int nthreads)
+	cdef void fftwf_threads_cleanup_threads();
 
-	ctypedef DTYPE_t_2 fftwf_complex[2]
-	ctypedef struct fftwf_plan:
+	ctypedef DTYPE_t_2 fftwf_threads_complex[2]
+	ctypedef struct fftwf_threads_plan:
 		pass
 
-	cdef fftwf_plan fftwf_plan_dft_1d(int N, fftwf_complex *inVar, fftwf_complex *outVar, int direction, unsigned char flags)
-	cdef void fftwf_execute(const fftwf_plan plan)
-	cdef void *fftwf_malloc(size_t size)
-	cdef void fftwf_destroy_plan(fftwf_plan plan)
-	cdef void fftwf_free(fftwf_complex[2] arr)
+	cdef fftwf_threads_plan fftwf_threads_plan_dft_1d(int N, fftwf_threads_complex *inVar, fftwf_threads_complex *outVar, int direction, unsigned char flags)
+	cdef void fftwf_threads_execute(const fftwf_threads_plan plan)
+	cdef void *fftwf_threads_malloc(size_t size)
+	cdef void fftwf_threads_destroy_plan(fftwf_threads_plan plan)
+	cdef void fftwf_threads_free(fftwf_threads_complex[2] arr)
 	cdef unsigned char FFTW_ESTIMATE = 1U << 6
 
 	cdef int fftw_import_wisdom_from_filename(const char *filename)
 
-fftwf_init_threads()
+fftwf_threads_init_threads()
 
 
 # Define our stokes functions for different forms / precisions
@@ -224,39 +224,39 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 
 	# Initialise FFTW, WARNING, THIS IS NOT THREAD SAFE, DO NOT ATTEMPT TO OMP/PRANGE YOUR WAY TO PARALLELISM AGAIN
 	if freqDecimation > 1:
-		fftwf_plan_with_nthreads(threadCount)
+		fftwf_threads_plan_with_nthreads(threadCount)
 
-	cdef fftwf_complex **inVarXArr = <fftwf_complex**>malloc(beamletCount * sizeof(fftwf_complex *))
-	cdef fftwf_complex **outVarXArr = <fftwf_complex**>malloc(beamletCount * sizeof(fftwf_complex *))
-	cdef fftwf_plan *fftPlanXArr = <fftwf_plan*>malloc(beamletCount * sizeof(fftwf_plan *))
-
-	for i in range(beamletCount):
-		inVarXArr[i] = <fftwf_complex*> fftwf_malloc(sizeof(fftwf_complex) * freqDecimation);
-		outVarXArr[i] = <fftwf_complex*> fftwf_malloc(sizeof(fftwf_complex) * freqDecimation);
-		fftPlanXArr[i] =  <fftwf_plan>fftwf_plan_dft_1d(freqDecimation, inVarXArr[i], outVarXArr[i], -1, FFTW_ESTIMATE)
-
-
-	cdef fftwf_complex **inVarYArr = <fftwf_complex**>malloc(beamletCount * sizeof(fftwf_complex *))
-	cdef fftwf_complex **outVarYArr =<fftwf_complex**> malloc(beamletCount * sizeof(fftwf_complex *))
-	cdef fftwf_plan *fftPlanYArr =  <fftwf_plan*>malloc(beamletCount * sizeof(fftwf_plan *))
+	cdef fftwf_threads_complex **inVarXArr = <fftwf_threads_complex**>malloc(beamletCount * sizeof(fftwf_threads_complex *))
+	cdef fftwf_threads_complex **outVarXArr = <fftwf_threads_complex**>malloc(beamletCount * sizeof(fftwf_threads_complex *))
+	cdef fftwf_threads_plan *fftPlanXArr = <fftwf_threads_plan*>malloc(beamletCount * sizeof(fftwf_threads_plan *))
 
 	for i in range(beamletCount):
-		inVarYArr[i] = <fftwf_complex*> fftwf_malloc(sizeof(fftwf_complex) * freqDecimation);
-		outVarYArr[i] = <fftwf_complex*> fftwf_malloc(sizeof(fftwf_complex) * freqDecimation);
-		fftPlanYArr[i] = <fftwf_plan>fftwf_plan_dft_1d(freqDecimation, inVarYArr[i], outVarYArr[i], -1, FFTW_ESTIMATE)
+		inVarXArr[i] = <fftwf_threads_complex*> fftwf_threads_malloc(sizeof(fftwf_threads_complex) * freqDecimation);
+		outVarXArr[i] = <fftwf_threads_complex*> fftwf_threads_malloc(sizeof(fftwf_threads_complex) * freqDecimation);
+		fftPlanXArr[i] =  <fftwf_threads_plan>fftwf_threads_plan_dft_1d(freqDecimation, inVarXArr[i], outVarXArr[i], -1, FFTW_ESTIMATE)
 
 
-	cdef fftwf_complex *inVarX
-	cdef fftwf_complex *outVarX
-	cdef fftwf_plan fftPlanX
+	cdef fftwf_threads_complex **inVarYArr = <fftwf_threads_complex**>malloc(beamletCount * sizeof(fftwf_threads_complex *))
+	cdef fftwf_threads_complex **outVarYArr =<fftwf_threads_complex**> malloc(beamletCount * sizeof(fftwf_threads_complex *))
+	cdef fftwf_threads_plan *fftPlanYArr =  <fftwf_threads_plan*>malloc(beamletCount * sizeof(fftwf_threads_plan *))
 
-	cdef fftwf_complex *inVarY
-	cdef fftwf_complex *outVarY
-	cdef fftwf_plan fftPlanY
+	for i in range(beamletCount):
+		inVarYArr[i] = <fftwf_threads_complex*> fftwf_threads_malloc(sizeof(fftwf_threads_complex) * freqDecimation);
+		outVarYArr[i] = <fftwf_threads_complex*> fftwf_threads_malloc(sizeof(fftwf_threads_complex) * freqDecimation);
+		fftPlanYArr[i] = <fftwf_threads_plan>fftwf_threads_plan_dft_1d(freqDecimation, inVarYArr[i], outVarYArr[i], -1, FFTW_ESTIMATE)
+
+
+	cdef fftwf_threads_complex *inVarX
+	cdef fftwf_threads_complex *outVarX
+	cdef fftwf_threads_plan fftPlanX
+
+	cdef fftwf_threads_complex *inVarY
+	cdef fftwf_threads_complex *outVarY
+	cdef fftwf_threads_plan fftPlanY
 	"""
-	cdef fftwf_complex *inVarY = <fftwf_complex*> fftwf_malloc(sizeof(fftwf_complex) * freqDecimation);
-	cdef fftwf_complex *outVarY = <fftwf_complex*> fftwf_malloc(sizeof(fftwf_complex) * freqDecimation);
-	cdef fftwf_plan fftPlanY = fftwf_plan_dft_1d(freqDecimation, inVarY, outVarY, -1, FFTW_ESTIMATE)
+	cdef fftwf_threads_complex *inVarY = <fftwf_threads_complex*> fftwf_threads_malloc(sizeof(fftwf_threads_complex) * freqDecimation);
+	cdef fftwf_threads_complex *outVarY = <fftwf_threads_complex*> fftwf_threads_malloc(sizeof(fftwf_threads_complex) * freqDecimation);
+	cdef fftwf_threads_plan fftPlanY = fftwf_threads_plan_dft_1d(freqDecimation, inVarY, outVarY, -1, FFTW_ESTIMATE)
 	"""
 
 	# Change the memory from time continuous to beam continuous
@@ -319,8 +319,8 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 
 					if filterbankIdx == filterbankLim:
 						filterbankIdx = 0
-						fftwf_execute(fftPlanX)
-						fftwf_execute(fftPlanY)
+						fftwf_threads_execute(fftPlanX)
+						fftwf_threads_execute(fftPlanY)
 
 						for l in range(fftOffset):
 							offsetIdx = l + fftOffset
@@ -336,12 +336,12 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 					else:
 						filterbankIdx = filterbankIdx + 1
 
-				fftwf_destroy_plan(fftPlanX)
-				fftwf_destroy_plan(fftPlanY)
-				fftwf_free(inVarX)
-				fftwf_free(inVarY)
-				fftwf_free(outVarX)
-				fftwf_free(outVarY)
+				fftwf_threads_destroy_plan(fftPlanX)
+				fftwf_threads_destroy_plan(fftPlanY)
+				fftwf_threads_free(inVarX)
+				fftwf_threads_free(inVarY)
+				fftwf_threads_free(outVarX)
+				fftwf_threads_free(outVarY)
 
 		else:
 			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
@@ -413,8 +413,8 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 
 					if filterbankIdx == filterbankLim:
 						filterbankIdx = 0
-						fftwf_execute(fftPlanX)
-						fftwf_execute(fftPlanY)
+						fftwf_threads_execute(fftPlanX)
+						fftwf_threads_execute(fftPlanY)
 
 						for l in range(fftOffset):
 							offsetIdx = l + fftOffset
@@ -429,12 +429,12 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 						filterbankIdx = filterbankIdx + 1
 
 
-				fftwf_destroy_plan(fftPlanX)
-				fftwf_destroy_plan(fftPlanY)
-				fftwf_free(inVarX)
-				fftwf_free(inVarY)
-				fftwf_free(outVarX)
-				fftwf_free(outVarY)
+				fftwf_threads_destroy_plan(fftPlanX)
+				fftwf_threads_destroy_plan(fftPlanY)
+				fftwf_threads_free(inVarX)
+				fftwf_threads_free(inVarY)
+				fftwf_threads_free(outVarX)
+				fftwf_threads_free(outVarY)
 
 
 		else:
@@ -466,5 +466,5 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 
 
 
-	fftwf_cleanup_threads()
+	fftwf_threads_cleanup_threads()
 	free(hannWindow)

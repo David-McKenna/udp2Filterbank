@@ -4,8 +4,6 @@
 from distutils.core import setup, Extension
 from Cython.Build import cythonize
 
-parkes_data_module = Extension('parkesData', sources = ['parkesData.c'])
-
 udp2FilExt = [
 	Extension( 	"",
 			 	sources = ["./cyUdp2fil.pyx"],

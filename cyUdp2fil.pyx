@@ -105,6 +105,7 @@ cpdef void readFile(char* fileLoc, int threadCount, long long readStart, long lo
 	if (readLength < -1):
 		raise RuntimeError(f"Issue with input Parameter: readStart, {readLength}")
 
+	cdef object t1, t2
 	cdef long long charSize
 	cdef DTYPE_t_1* fileData
 	cdef FILE *fileRef = fopen(fileLoc, 'r')
@@ -169,6 +170,8 @@ cpdef void readFile(char* fileLoc, int threadCount, long long readStart, long lo
 cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, unsigned char stokesIT, unsigned char stokesVT, int timeDecimation, int freqDecimation, char* outputLoc, char* outputLoc2):
 
 	# Initialise all variables.
+	cdef object t1, t2
+
 	cdef unsigned char Xr, Xi, Yr, Yi
 
 	cdef int j, k, kSet, l, offsetIdx, idx1, idx2, combinedSteps
@@ -287,7 +290,7 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 
 	if stokesVT and stokesIT:
 		printf("Processing StoKes I and Stokes V...\n")
-
+		t1 = time.time()
 
 		if freqDecimation > 1:
 			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
@@ -368,6 +371,10 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 		else:
 			stokesDualOut_view = stokesDual_view
 
+		t2 = time.time()
+		print("This took {:.2f} seconds, each sample taking {:.4f} seconds to process.".format(t2 - t1, stokesDualData.size / 2 / (t2 - t1)))
+
+		t1 = time.time()
 		writeData(stokesDualOut_view, dataLength, &outputLoc[0], &outputLoc2[0])
 
 	else:
@@ -383,6 +390,8 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 		else:
 			printf("No Stokes Method Selected; exiting.")
 			return
+
+		t1 = time.time()
 
 		if freqDecimation > 1:
 			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
@@ -460,8 +469,14 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 		else:
 			stokesSingleOut_view = stokesSingle_view
 
+		t2 = time.time()
+		print("This took {:.2f} seconds, each sample taking {:.4f} seconds to process.".format(t2 - t1, stokesSingleData.size / (t2 - t1)))
+
+		t1 = time.time()
 		writeDataShrunk(stokesSingleOut_view, dataLength, &outputLoc[0])
 
+	t2 = time.time()
+	print("This took {:.2f} seconds, giving a write speed of {:.2f}MB/s".format(t2 - t1, dataLength * 4 / 1024 / 1024 / (t2 - t1)))
 
 
 	fftwf_cleanup_threads()

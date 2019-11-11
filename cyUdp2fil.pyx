@@ -1,5 +1,5 @@
 # distutils: extra_compile_args = -fopenmp -O3 -march=native
-# distutils: extra_link_args = -fopenmp -lfftw3f_threads
+# distutils: extra_link_args = -fopenmp -lfftw3f_threads -lfftw3f
 # cython: language_level=3
 # cython: embedsignature=False
 # cython: boundscheck=False

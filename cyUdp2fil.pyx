@@ -372,7 +372,7 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 			stokesDualOut_view = stokesDual_view
 
 		t2 = time.time()
-		print("This took {:.2f} seconds, each sample taking {:.4f} seconds to process.".format(t2 - t1, stokesDualData.size / 2 / (t2 - t1)))
+		print("This took {:.2f} seconds, each sample taking {:f} seconds to process.".format(t2 - t1, (t2 - t1) / stokesDualData.size / 2))
 
 		t1 = time.time()
 		writeData(stokesDualOut_view, dataLength, &outputLoc[0], &outputLoc2[0])
@@ -470,7 +470,7 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 			stokesSingleOut_view = stokesSingle_view
 
 		t2 = time.time()
-		print("This took {:.2f} seconds, each sample taking {:.4f} seconds to process.".format(t2 - t1, stokesSingleData.size / (t2 - t1)))
+		print("This took {:.2f} seconds, each sample taking {:} seconds to process.".format(t2 - t1, (t2 - t1) / stokesSingleData.size))
 
 		t1 = time.time()
 		writeDataShrunk(stokesSingleOut_view, dataLength, &outputLoc[0])

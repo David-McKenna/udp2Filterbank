@@ -144,7 +144,7 @@ endif
 
 
 # ucc2 doesn't have zstd installed, fallback to self-compiled binaries
-if(`where zstd` == "") then
+if(`which zstd` == "") then
     set zstdcmd = "/home/dmckenna/bin/zstd"
 else
     set zstdcmd = "zstd"
@@ -154,8 +154,8 @@ if ( "$file" =~ *.zst ) then
     echo ""
     echo "Compressed observation detected, decompressing to "$outfile'.decompressed'
 
-    $zstd -d $file $outfile'.decompressed'
-    set infile = $outfile'.decompressed'
+    $zstdcmd -d $file $outfile'.decompressed'
+    set file = $outfile'.decompressed'
 
     echo ""
 endif

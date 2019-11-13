@@ -138,6 +138,27 @@ endif
 
 echo "Data recorded in" $mode "mode"
 
+if ( "$outfile" =~ */* ) then
+    mkdir -p "`dirname $outfile`"
+endif
+
+
+# ucc2 doesn't have zstd installed, fallback to self-compiled binaries
+if(`where zstd` == "") then
+    set zstdcmd = "/home/dmckenna/bin/zstd"
+else
+    set zstdcmd = "zstd"
+endif
+
+if ( "$file" =~ *.zst ) then
+    echo ""
+    echo "Compressed observation detected, decompressing to "$outfile'.decompressed'
+
+    $zstd -d $file $outfile'.decompressed'
+    set infile = $outfile'.decompressed'
+
+    echo ""
+endif
 
 
 # Determine the size of each execution
@@ -193,10 +214,6 @@ else
     /home/obs/Joe/realta_scripts/mockHeader/mockHeader -raw $file -tel $tel -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits 32 -tstart $MJD -nifs $npols -ra $ra -dec $dec -source $psrName headerfile_341
 endif
 
-if ( "$outfile" =~ */* ) then
-    mkdir -p "`dirname $outfile`"
-endif
-
 cat headerfile_341 >> $outfile
 
 
@@ -207,6 +224,12 @@ foreach loop (`seq 0 $nloops`)
     python3 ./udp2fil_cywrapper.py -infile $file -start $hd -readlength $chunksize -o $outfile -I $stokesI -V $stokesV -sumSize $timeWindow -fftSize $fftWindow -t $ncores_avail
 
 end
+
+if ( "$infile" =~ *.decompressed ) then
+    echo ""
+    echo "Cleaning up decompression artefacts."
+    rm $outfile'.decompressed'
+endif
 
 marbh:
 exit

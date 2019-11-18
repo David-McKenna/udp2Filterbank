@@ -228,7 +228,7 @@ foreach loop (`seq 0 $nloops`)
 
 end
 
-if ( "$infile" =~ *.decompressed ) then
+if ( "$file" =~ *.decompressed ) then
     echo ""
     echo "Cleaning up decompression artefacts."
     rm $outfile'.decompressed'

@@ -202,7 +202,7 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 	# Initialise memory for our data
 	structuredFileData = np.zeros((beamletCount, packetCount * scans,  4), dtype = DTYPE_1)
 
-	if stokesVT + stokesIT == 1:
+	if (stokesVT + stokesIT) == 1:
 		stokesSingleData = np.zeros((packetCount * scans // freqDecimation, beamletCount * freqDecimation), dtype = DTYPE_2)
 		stokesSingleOut = np.zeros((packetCount * scans // timeDecimation // freqDecimation, beamletCount * freqDecimation), dtype = DTYPE_2)
 
@@ -266,6 +266,9 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 	printf("Restructuring the dataset in memory...\n")
 
 	cdef long baseOffset, beamletIdx, __
+
+	printf("Benchmark -1: prange memory\n")
+	t1 = time.time()
 	for i in prange(packetCount, nogil = True, schedule = 'guided', num_threads = threadCount):
 	#for i in range(packetCount):
 		baseOffset = udpPacketLength * i + udpHeaderLength
@@ -279,7 +282,29 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 				structuredFileData_view[beamletCount - 1 - j][timeIdx][1] += fileData[beamletIdx + kSet + 1] # Xi
 				structuredFileData_view[beamletCount - 1 - j][timeIdx][2] += fileData[beamletIdx + kSet + 2] # Yr
 				structuredFileData_view[beamletCount - 1 - j][timeIdx][3] += fileData[beamletIdx + kSet + 3] # Yi
+	t2 = time.time()
+	print("Benchmark -1 complete: {}".format(t2 - t1))
 
+	structuredFileData = np.zeros((beamletCount, packetCount * scans,  4), dtype = DTYPE_1)
+
+	printf("Benchmark 0: range memory\n")
+	t1 = time.time()
+	#for i in prange(packetCount, nogil = True, schedule = 'guided', num_threads = threadCount):
+	for i in range(packetCount):
+		baseOffset = udpPacketLength * i + udpHeaderLength
+		for j in range(beamletCount):
+			beamletIdx = baseOffset + j * scans * 4
+			for k in range(scans):
+				# Filterbank expects the frequency to be reversed compared to input flow
+				kSet = k * 4
+				timeIdx = i * scans + k
+				structuredFileData_view[beamletCount - 1 - j][timeIdx][0] += fileData[beamletIdx + kSet] # Xr
+				structuredFileData_view[beamletCount - 1 - j][timeIdx][1] += fileData[beamletIdx + kSet + 1] # Xi
+				structuredFileData_view[beamletCount - 1 - j][timeIdx][2] += fileData[beamletIdx + kSet + 2] # Yr
+				structuredFileData_view[beamletCount - 1 - j][timeIdx][3] += fileData[beamletIdx + kSet + 3] # Yi
+	t2 = time.time()
+
+	print("Benchmark 0 complete: {}".format(t2 - t1))
 	# Release the raw data.
 	free(fileData)
 
@@ -288,11 +313,27 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 	for i in range(freqDecimation):
 		hannWindow[i] = pow(sin(pi * i / freqDecimation), 2)
 
-	if stokesVT and stokesIT:
-		printf("Processing StoKes I and Stokes V...\n")
+
+	if True:
+
+		if stokesIT:
+			stokesFunc = stokesI
+			stokesFFunc = stokesIf
+			printf("Processing Stokes I...\n")
+		elif stokesVT:
+			stokesFunc = stokesV
+			stokesFFunc = stokesVf
+			printf("Processing Stokes V...\n")
+		else:
+			printf("No Stokes Method Selected; exiting.")
+			return
+
 		t1 = time.time()
 
-		if freqDecimation > 1:
+		if True:
+
+			printf("Benchmark 1: prange Frequency w/ threads\n")
+			t1 = time.time()
 			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
 			#for j in range(beamletCount):
 				filterbankIdx = 0
@@ -305,7 +346,6 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 				outVarY = outVarYArr[j]
 				fftPlanX = fftPlanXArr[j]
 				fftPlanY = fftPlanYArr[j]
-
 
 				for i in range(timeSteps):
 					#Xr = structuredFileData_view[j][i][0]
@@ -327,73 +367,40 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 							offsetIdx = l + fftOffset
 							idx1 = fftOffset - 1 - l
 							idx2 = freqDecimation - 1 - l
-							stokesDual_view[0][timeIdx][j * freqDecimation + l] = stokesIf(outVarX[idx1][0], outVarX[idx1][1], outVarY[idx1][0], outVarY[idx1][1])
-							stokesDual_view[0][timeIdx][j * freqDecimation + offsetIdx] = stokesIf(outVarX[idx2][0], outVarX[idx2][1], outVarY[idx2][0], outVarY[idx2][1])
-							stokesDual_view[1][timeIdx][j * freqDecimation + l] = stokesVf(outVarX[idx1][0], outVarX[idx1][1], outVarY[idx1][0], outVarY[idx1][1])
-							stokesDual_view[1][timeIdx][j * freqDecimation + offsetIdx] = stokesVf(outVarX[idx2][0], outVarX[idx2][1], outVarY[idx2][0], outVarY[idx2][1])
+							stokesSingle_view[timeIdx][j * freqDecimation + l] = stokesFFunc(outVarX[idx1][0], outVarX[idx1][1], outVarY[idx1][0], outVarY[idx1][1])
+							stokesSingle_view[timeIdx][j * freqDecimation + offsetIdx] = stokesFFunc(outVarX[idx2][0], outVarX[idx2][1], outVarY[idx2][0], outVarY[idx2][1])
 						
 
 						timeIdx = timeIdx + 1
 					else:
 						filterbankIdx = filterbankIdx + 1
-
+				
 				fftwf_destroy_plan(fftPlanX)
 				fftwf_destroy_plan(fftPlanY)
 				fftwf_free(inVarX)
 				fftwf_free(inVarY)
 				fftwf_free(outVarX)
 				fftwf_free(outVarY)
+			fftwf_cleanup_threads()
+			t2 = time.time()
+			print("Benchmark 1 complete: {}".format(t2 - t1))
 
-		else:
-			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
-			#for j in range(beamletCount):
-				for i in range(timeSteps):
-					stokesDual_view[0][i][j] = stokesI(structuredFileData_view[j][i][0], structuredFileData_view[j][i][1], structuredFileData_view[j][i][2], structuredFileData_view[j][i][3])
-					stokesDual_view[1][i][j] = stokesV(structuredFileData_view[j][i][0], structuredFileData_view[j][i][1], structuredFileData_view[j][i][2], structuredFileData_view[j][i][3])
+			stokesSingleData = np.zeros((packetCount * scans // freqDecimation, beamletCount * freqDecimation), dtype = DTYPE_2)
+			fftwf_plan_with_nthreads(1)
+		
+		
+			for i in range(beamletCount):
+				inVarXArr[i] = <fftwf_complex*> fftwf_malloc(sizeof(fftwf_complex) * freqDecimation);
+				outVarXArr[i] = <fftwf_complex*> fftwf_malloc(sizeof(fftwf_complex) * freqDecimation);
+				fftPlanXArr[i] =  <fftwf_plan>fftwf_plan_dft_1d(freqDecimation, inVarXArr[i], outVarXArr[i], -1, FFTW_ESTIMATE)
+		
+			for i in range(beamletCount):
+				inVarYArr[i] = <fftwf_complex*> fftwf_malloc(sizeof(fftwf_complex) * freqDecimation);
+				outVarYArr[i] = <fftwf_complex*> fftwf_malloc(sizeof(fftwf_complex) * freqDecimation);
+				fftPlanYArr[i] = <fftwf_plan>fftwf_plan_dft_1d(freqDecimation, inVarYArr[i], outVarYArr[i], -1, FFTW_ESTIMATE)
 
-
-		timeSteps /= freqDecimation
-		if timeDecimation > 1:
-			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
-			#for j in range(beamletCount):
-				timeIdx = 0
-				combinedSteps = 1
-				for i in range(timeSteps):
-					stokesDualOut_view[0][timeIdx][j] = stokesDualOut_view[0][timeIdx][j] + stokesDual_view[0][i][j]
-					stokesDualOut_view[1][timeIdx][j] = stokesDualOut_view[1][timeIdx][j] + stokesDual_view[1][i][j]
-
-					if combinedSteps == timeDecimation:
-						combinedSteps = 1 
-						timeIdx = timeIdx + 1
-					else:
-						combinedSteps = combinedSteps + 1
-
-		else:
-			stokesDualOut_view = stokesDual_view
-
-		t2 = time.time()
-		print("This took {:.2f} seconds, each sample taking {:f} seconds to process.".format(t2 - t1, (t2 - t1) / stokesDualData.size / 2))
-
-		t1 = time.time()
-		writeData(stokesDualOut_view, dataLength, &outputLoc[0], &outputLoc2[0])
-
-	else:
-
-		if stokesIT:
-			stokesFunc = stokesI
-			stokesFFunc = stokesIf
-			printf("Processing Stokes I...\n")
-		elif stokesVT:
-			stokesFunc = stokesV
-			stokesFFunc = stokesVf
-			printf("Processing Stokes V...\n")
-		else:
-			printf("No Stokes Method Selected; exiting.")
-			return
-
-		t1 = time.time()
-
-		if freqDecimation > 1:
+			printf("Benchmark 2: prange Frequency w/o/ threads\n")
+			t1 = time.time()
 			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
 			#for j in range(beamletCount):
 				filterbankIdx = 0
@@ -435,7 +442,6 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 					else:
 						filterbankIdx = filterbankIdx + 1
 
-
 				fftwf_destroy_plan(fftPlanX)
 				fftwf_destroy_plan(fftPlanY)
 				fftwf_free(inVarX)
@@ -444,15 +450,37 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 				fftwf_free(outVarY)
 
 
-		else:
+			t2 = time.time()
+			print("Benchmark 2 complete: {}".format(t2-t1))
+
+			stokesSingleData = np.zeros((packetCount * scans // freqDecimation, beamletCount * freqDecimation), dtype = DTYPE_2)
+
+
+			printf("Benchmark 3: prange memeory reordering\n")
+			t1 = time.time()
 			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
 			#for j in range(beamletCount):
 				for i in range(timeSteps):
 					stokesSingle_view[i][j] = stokesFunc(structuredFileData_view[j][i][0], structuredFileData_view[j][i][1], structuredFileData_view[j][i][2], structuredFileData_view[j][i][3])
+			t2 = time.time()
+			print("Benchmark 3 complete: {}".format(t2 - t1))
+
+			stokesSingleData = np.zeros((packetCount * scans // freqDecimation, beamletCount * freqDecimation), dtype = DTYPE_2)
+
+			printf("Benchmark 4: range memory reordering\n")
+			t1 = time.time()
+			#for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
+			for j in range(beamletCount):
+				for i in range(timeSteps):
+					stokesSingle_view[i][j] = stokesFunc(structuredFileData_view[j][i][0], structuredFileData_view[j][i][1], structuredFileData_view[j][i][2], structuredFileData_view[j][i][3])
+			t2 = time.time()
+			print("benchmark 4 complete: {}".format(t2 - t1))
 
 
-		timeSteps /= freqDecimation
-		if timeDecimation > 1:
+		if True:
+
+			printf("Benchmark 5: prange time")
+			t1 = time.time()
 			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
 			#for j in range(beamletCount):
 				timeIdx = 0
@@ -465,19 +493,32 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 						timeIdx = timeIdx + 1
 					else:
 						combinedSteps = combinedSteps + 1
+			t2 = time.time()
+			print("Benchmark 5 complete: {}".format(t2 - t1))
 
-		else:
-			stokesSingleOut_view = stokesSingle_view
+			stokesSingleOut = np.zeros((packetCount * scans // timeDecimation // freqDecimation, beamletCount * freqDecimation), dtype = DTYPE_2)
 
-		t2 = time.time()
-		print("This took {:.2f} seconds, each sample taking {:} seconds to process.".format(t2 - t1, (t2 - t1) / stokesSingleData.size))
+			printf("Benchmark 6: range time")
+			t1 = time.time()
+			#for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
+			for j in range(beamletCount):
+				timeIdx = 0
+				combinedSteps = 1
+				for i in range(timeSteps):
+					stokesSingleOut_view[timeIdx][j] = stokesSingleOut_view[timeIdx][j] + stokesSingle_view[i][j]
 
-		t1 = time.time()
-		writeDataShrunk(stokesSingleOut_view, dataLength, &outputLoc[0])
+					if combinedSteps == timeDecimation:
+						combinedSteps = 1 
+						timeIdx = timeIdx + 1
+					else:
+						combinedSteps = combinedSteps + 1
+			t2 = time.time()
+			print("Benchmark 6 compelte: {}".format(t2 - t1))
 
-	t2 = time.time()
-	print("This took {:.2f} seconds, giving a write speed of {:.2f}MB/s".format(t2 - t1, dataLength * 4 / 1024 / 1024 / (t2 - t1)))
-
-
-	fftwf_cleanup_threads()
 	free(hannWindow)
+	free(inVarXArr)
+	free(inVarYArr)
+	free(outVarXArr)
+	free(outVarYArr)
+	free(fftPlanXArr)
+	free(fftPlanYArr)

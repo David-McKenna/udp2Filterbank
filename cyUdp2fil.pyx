@@ -260,7 +260,6 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 	printf("Restructuring the dataset in memory...\n")
 
 	for i in prange(packetCount, nogil = True, schedule = 'guided', num_threads = threadCount):
-	#for i in range(packetCount):
 		baseOffset = udpPacketLength * i + udpHeaderLength
 		for j in range(beamletCount):
 			beamletIdx = baseOffset + j * scans * 4
@@ -346,7 +345,6 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 		else:
 			# Just process the Stokes values if we aren't doing a frequency trade off
 			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
-			#for j in range(beamletCount):
 				for i in range(timeSteps):
 					stokesDual_view[0][i][j] = stokesI(structuredFileData_view[j][i][0], structuredFileData_view[j][i][1], structuredFileData_view[j][i][2], structuredFileData_view[j][i][3])
 					stokesDual_view[1][i][j] = stokesV(structuredFileData_view[j][i][0], structuredFileData_view[j][i][1], structuredFileData_view[j][i][2], structuredFileData_view[j][i][3])
@@ -357,7 +355,6 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 		# Sum over time if we are decimating the data
 		if timeDecimation > 1:
 			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
-			#for j in range(beamletCount):
 				timeIdx = 0
 				combinedSteps = 1
 				for i in range(timeSteps):
@@ -400,7 +397,6 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 		# Handle the frequency/time tradeoff
 		if freqDecimation > 1:
 			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
-			#for j in range(beamletCount):
 				filterbankIdx = 0
 				filterbankLim = freqDecimation - 1
 				timeIdx = 0
@@ -454,7 +450,6 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 		else:
 			# Just process the Stokes value if we aren't doing a frequency trade off
 			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
-			#for j in range(beamletCount):
 				for i in range(timeSteps):
 					stokesSingle_view[i][j] = stokesFunc(structuredFileData_view[j][i][0], structuredFileData_view[j][i][1], structuredFileData_view[j][i][2], structuredFileData_view[j][i][3])
 
@@ -465,7 +460,6 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 		# Sum over time if we are decimating the data
 		if timeDecimation > 1:
 			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
-			#for j in range(beamletCount):
 				timeIdx = 0
 				combinedSteps = 1
 				for i in range(timeSteps):

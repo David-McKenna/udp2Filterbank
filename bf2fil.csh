@@ -20,7 +20,9 @@
 #Add facility to grab the MJD from the input filename
 #2019-03-22 Modified by Joe McCauley
 #Add ra & dec optional parameters
-#
+
+
+
 #2019-10-* Modified by David McKenna
 #   No longer apply chunking to the input dataset; use a new Cython-based backend
 #   to read / process / write the data to a single output file. Also adds in time/
@@ -150,6 +152,14 @@ else
     set zstdcmd = "zstd"
 endif
 
+
+# REALTA doesn't have mockHeader on the path, fallback to self-compiled binaries
+if(`which mockHeader` == "") then
+    set mockHeaderCmd = "/home/obs/Joe/realta_scripts/mockHeader/mockHeader"
+else
+    set mockHeaderCmd = "mockHeader"
+endif
+
 if ( "$file" =~ *.zst ) then
     echo ""
     echo "Compressed observation detected, decompressing to "$outfile'.decompressed'
@@ -210,11 +220,10 @@ echo ""
 
 
 if ( $ra == 0 ) then
-#    /home/obs/Joe/realta_scripts/mockHeader/mockHeader -tel $tel -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits 32 -tstart $MJD -nifs $npols -source $psrName headerfile_341
-    /home/obs/Joe/realta_scripts/mockHeader/mockHeader -raw $rawfilepatch -tel $tel -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits 32 -tstart $MJD -nifs $npols -source $psrName headerfile_341
-#    /home/obs/Joe/realta_scripts/mockHeader/mockHeader -tel $tel -tsamp 0.00000512 -fch1 $fch1 -fo -0.01220703125 -nchans 1952 -nifs 1 -nbits 32 -tstart $MJD headerfile_341
+    mockHeaderCmd -raw $rawfilepatch -tel $tel -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits 32 -tstart $MJD -nifs $npols -source $psrName headerfile_341
+
 else
-    /home/obs/Joe/realta_scripts/mockHeader/mockHeader -raw $rawfilepatch -tel $tel -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits 32 -tstart $MJD -nifs $npols -ra $ra -dec $dec -source $psrName headerfile_341
+    mockHeaderCmd -raw $rawfilepatch -tel $tel -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits 32 -tstart $MJD -nifs $npols -ra $ra -dec $dec -source $psrName headerfile_341
 endif
 
 cat headerfile_341 >> $outfile
@@ -228,7 +237,7 @@ foreach loop (`seq 0 $nloops`)
 
 end
 
-if ( "$infile" =~ *.decompressed ) then
+if ( "$file" =~ *.decompressed ) then
     echo ""
     echo "Cleaning up decompression artefacts."
     rm $outfile'.decompressed'

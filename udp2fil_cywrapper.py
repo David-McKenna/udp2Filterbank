@@ -10,9 +10,6 @@ More arguments to handle expanded filterbanking script (start byte/length/stokes
 import argparse
 from datetime import datetime, timedelta
 
-#from Tkinter import Tk
-#from tkFileDialog import askopenfilenames
-#import tkSimpleDialog 
 
 ## Parse command line arguments & set default values
 parser = argparse.ArgumentParser()

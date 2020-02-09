@@ -14,8 +14,8 @@ udp2FilExt = [
 ]
 
 
-setup(name='lofarCyxData',
+setup(name='ilofarCyxDataProcessor',
 	version='0.0.0',
-	description='Attempt 2',
+	description='BF UDP datastream to sigproc filterbank processor backend.',
 	ext_modules=cythonize(udp2FilExt))
 

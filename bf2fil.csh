@@ -227,6 +227,13 @@ else
 endif
 
 cat headerfile_341 >> $outfile
+if ( $stokesI == 1 ) then
+        cat $outfile > $outfile"_stokesI.fil"
+endif
+if ( $stokesV == 1 ) then
+        cat $outfile > $outfile"_stokesV.fil"
+endif
+
 
 
 

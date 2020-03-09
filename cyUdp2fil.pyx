@@ -90,7 +90,7 @@ cdef void writeData(DTYPE_t_2[:, :, ::1] dataSet, long long dataLength, char out
 
 
 # Main read function: handles getting all data from disk into memory.
-cpdef void readFile(char* fileLoc, int threadCount, long long readStart, long long readLength, unsigned char stokesIT, unsigned char stokesVT, int timeDecimation, int freqDecimation, char* outputLoc):
+cpdef void readFile(char* fileLoc, char* portPattern, int ports, int threadCount, long long readStart, long long readLength, unsigned char stokesIT, unsigned char stokesVT, int timeDecimation, int freqDecimation, char* outputLoc):
 
 
 	# Standard sanity checks.
@@ -109,16 +109,24 @@ cpdef void readFile(char* fileLoc, int threadCount, long long readStart, long lo
 	cdef object t1, t2
 	cdef long long charSize
 	cdef DTYPE_t_1* fileData
-	cdef FILE *fileRef = fopen(fileLoc, 'r')
+	cdef const long long packetCount = charSize // 7824 # Divide by the length of a standard UDP packet
+	cdef const int beamletCount = 122
+	cdef const int scans = 16
+	cdef int i = 0, port = 0
+	cdef int beamletBase = 0
+
+	cdef FILE *fileRef
+
+	for i in range(ports):
+		fileTemp = fileLoc.replace(portPattern, str(int(portPattern) + i))
+		print("Attempting to open file for port {} at {}....".format(str(int(portPattern) + i), fileTemp))
+		fileRef = fopen(fileTemp, 'r')
 	
-	if (fileRef == NULL):
-		raise RuntimeError(f"Unable to open file at {fileLoc}")
+		if (fileRef == NULL):
+			raise RuntimeError(f"Unable to open file at {fileTemp}")
 
-	printf("Begining Data Read...\n")
-	t1 = time.time()
-
-	# nogil = No python memory locks
-	with nogil:
+		# Check file length against requested read length -- different ports may have different numbers of packets
+		# 	due to packet loss, only save the shortest data length as the read target if needed.
 		fseek(fileRef, 0, SEEK_END)
 		charSize = ftell(fileRef) # Get the length of the file
 
@@ -130,44 +138,81 @@ cpdef void readFile(char* fileLoc, int threadCount, long long readStart, long lo
 		else:
 			charSize = readLength
 
-		fseek(fileRef, readStart, SEEK_SET)
+	printf("Begining Data Read...\n\n")
+	# Initialise memory for our data, setup memviews
+	# Cython requires empties be setup if we are going to define a variable,
+	# 	so file 1 element arrays for the unused shape.
+	structuredFileData = np.zeros((beamletCount * ports, packetCount * scans,  4), dtype = DTYPE_1)
+	cdef DTYPE_t_1[:, :, ::1] stucturedFileData_view = structuredFileData
+	fileData = <DTYPE_t_1*>malloc(charSize * ports * sizeof(DTYPE_t_1))
+	t0 = time.time()
+	for i in range(ports):
+		t1 = time.time()
 
-		# malloc to hold the data in memory; free'd in the sub function.
-		fileData = <DTYPE_t_1*>malloc(charSize * sizeof(DTYPE_t_1))
-		if not fread(fileData, 1, charSize, fileRef):
-			raise IOError(f"Unable to read file at {fileLoc}")
+		# nogil = No python memory locks
+		with nogil:
+			fseek(fileRef, readStart, SEEK_SET)
 
-		fclose(fileRef)
+			if not fread(fileData + sizeof(DTYPE_t_1) * ports * charSize, 1, charSize, fileRef):
+				raise IOError(f"Unable to read file at {fileLoc}")
+
+			fclose(fileRef)
 
 
-	t2 = time.time()
-	cdef long long packetCount = charSize // 7824 # Divide by the length of a standard UDP packet
-	printf("Successfully Read %lld Packets into %lld bytes.\n", packetCount, charSize * sizeof(DTYPE_t_1))
-	print("This took {:.2f} seconds, giving a read speed of {:.2f}MB/s".format(t2 - t1, charSize / 1024 / 1024 / (t2 - t1)))
+		t2 = time.time()
+		printf("Successfully Read %lld Packets into %lld bytes.\n", packetCount, charSize * sizeof(DTYPE_t_1))
+		print("This took {:.2f} seconds, giving a read speed of {:.2f}MB/s".format(t2 - t1, charSize / 1024 / 1024 / (t2 - t1)))
 
+	t3 = time.time()
+	printf("\n\n")
+	printf("Data reading complete for all ports.\n")
+	printf("Successfully Read All Data, %lld Packets into %lld bytes.\n", packetCount * ports, ports * charSize * sizeof(DTYPE_t_1))
+	print("This took {:.2f} seconds, giving an overall read speed of {:.2f}MB/s".format(t3 - t0, charSize * ports / 1024 / 1024 / (t3 - t0)))
+
+
+	# Change the memory from time continuous to beam continuous
+	# This is simply to make my life easier while creating this script.
+	printf("Restructuring the dataset in memory...\n")
+	for port in range(ports):
+		for i in prange(packetCount, nogil = True, schedule = 'guided', num_threads = threadCount):
+			baseOffset = packetCount * port + udpPacketLength * i + udpHeaderLength
+			beamletBase = beamletCount * port
+			for j in range(beamletCount):
+				beamletIdx = baseOffset + j * scans * 4
+				for k in range(scans):
+					# Filterbank expects the frequency to be reversed compared to input flow
+					kSet = k * 4
+					timeIdx = i * scans + k
+					structuredFileData_view[beamletBase - 1 - j][timeIdx][0] += fileData[beamletIdx + kSet] # Xr
+					structuredFileData_view[beamletBase - 1 - j][timeIdx][1] += fileData[beamletIdx + kSet + 1] # Xi
+					structuredFileData_view[beamletBase - 1 - j][timeIdx][2] += fileData[beamletIdx + kSet + 2] # Yr
+					structuredFileData_view[beamletBase - 1 - j][timeIdx][3] += fileData[beamletIdx + kSet + 3] # Yi
+
+	# Release the raw data.
+	free(fileData)
 
 	# Assume our output location is less than 1k characters long...
 	cdef char[1000] outputF
 	cdef char[1000] outputF2
 
 	if outputLoc == b"":
-		if stokesIT and stokesVT:
-			sprintf(outputF, "%s_stokesI.fil.tmp", fileLoc)
-			sprintf(outputF2, "%s_stokesV.fil.tmp", fileLoc)
-		else:
-			sprintf(outputF, "%s.tmp", fileLoc)	
+		baseName = fileLoc
 	else:
-		if stokesIT and stokesVT:
-			sprintf(outputF, "%s_stokesI.fil", outputLoc)
-			sprintf(outputF2, "%s_stokesV.fil", outputLoc)
-		else:
-			sprintf(outputF, "%s", outputLoc)
+		baseName = outputLoc
 
+	if stokesIT and stokesVT:
+		sprintf(outputF, "%s_stokesI.fil", baseName)
+		sprintf(outputF2, "%s_stokesV.fil", baseName)
+	else:
+		if stokesIT:
+			sprintf(outputF, "%s_stokesI.fil", baseName)
+		else:
+			sprintf(outputF, "%s_stokesV.fil", baseName)
 
 	# fileData is free'd in this function
-	processData(fileData, threadCount, packetCount, stokesIT, stokesVT, timeDecimation, freqDecimation, outputF, outputF2)
+	processData(&structuredFileData_view, ports, threadCount, packetCount, stokesIT, stokesVT, timeDecimation, freqDecimation, outputF, outputF2)
 
-cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, unsigned char stokesIT, unsigned char stokesVT, int timeDecimation, int freqDecimation, char* outputLoc, char* outputLoc2):
+cdef void processData(DTYPE_t_1* structuredFileData_view, int ports, int threadCount, const long packetCount, unsigned char stokesIT, unsigned char stokesVT, int timeDecimation, int freqDecimation, char* outputLoc, char* outputLoc2):
 
 	# Initialise all variables.
 	cdef func 
@@ -176,19 +221,19 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 	cdef unsigned char Xr, Xi, Yr, Yi
 
 	cdef int j, k, kSet, l, offsetIdx, idx1, idx2, combinedSteps
-	cdef int beamletCount = 122
-	cdef int scans = 16
+	cdef int beamletCount = 122 * ports
+	cdef const int scans = 16
 	cdef int filterbankIdx = 0
 	cdef int filterbankLim = freqDecimation - 1
 	cdef int fftOffset = freqDecimation // 2
 	cdef int mirror = 0
 
-	cdef DTYPE_t_2 *hannWindow = <DTYPE_t_2*>malloc(sizeof(DTYPE_t_2) * freqDecimation)
+	#cdef DTYPE_t_2 *hannWindow = <DTYPE_t_2*>malloc(sizeof(DTYPE_t_2) * freqDecimation)
 	cdef DTYPE_t_2 pi = np.pi
 
 	cdef long i, iSet, baseOffset, beamletIdx, __
-	cdef long udpPacketLength = 7824
-	cdef long udpHeaderLength = 16
+	cdef const long udpPacketLength = 7824
+	cdef const long udpHeaderLength = 16
 	cdef long timeIdx = 0
 	cdef long timeSteps = packetCount * scans
 
@@ -208,7 +253,6 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 	# Initialise memory for our data, setup memviews
 	# Cython requires empties be setup if we are going to define a variable,
 	# 	so file 1 element arrays for the unused shape.
-	structuredFileData = np.zeros((beamletCount, packetCount * scans,  4), dtype = DTYPE_1)
 
 	if stokesVT + stokesIT == 1:
 		stokesSingleData = np.zeros((packetCount * scans // freqDecimation, beamletCount * freqDecimation), dtype = DTYPE_2)
@@ -223,7 +267,6 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 		stokesSingleData = np.zeros((1,1), dtype = DTYPE_2)
 		stokesSingleOut = np.zeros((1,1), dtype = DTYPE_2)
 	
-	cdef DTYPE_t_1[:, :, ::1] structuredFileData_view = structuredFileData
 	cdef DTYPE_t_2[:, ::1] stokesSingle_view = stokesSingleData
 	cdef DTYPE_t_2[:, :, ::1] stokesDual_view = stokesDualData
 	cdef DTYPE_t_2[:, ::1] stokesSingleOut_view = stokesSingleOut
@@ -256,35 +299,14 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 		fftPlanYArr[i] = <fftwf_plan> fftwf_plan_dft_1d(freqDecimation, inVarYArr[i], outVarYArr[i], -1, FFTW_ESTIMATE)
 
 
-	# Change the memory from time continuous to beam continuous
-	# This is simply to make my life easier while creating this script.
-	printf("Restructuring the dataset in memory...\n")
-
-	for i in prange(packetCount, nogil = True, schedule = 'guided', num_threads = threadCount):
-		baseOffset = udpPacketLength * i + udpHeaderLength
-		for j in range(beamletCount):
-			beamletIdx = baseOffset + j * scans * 4
-			for k in range(scans):
-				# Filterbank expects the frequency to be reversed compared to input flow
-				kSet = k * 4
-				timeIdx = i * scans + k
-				structuredFileData_view[beamletCount - 1 - j][timeIdx][0] += fileData[beamletIdx + kSet] # Xr
-				structuredFileData_view[beamletCount - 1 - j][timeIdx][1] += fileData[beamletIdx + kSet + 1] # Xi
-				structuredFileData_view[beamletCount - 1 - j][timeIdx][2] += fileData[beamletIdx + kSet + 2] # Yr
-				structuredFileData_view[beamletCount - 1 - j][timeIdx][3] += fileData[beamletIdx + kSet + 3] # Yi
-
-	# Release the raw data.
-	free(fileData)
-
-
 	# Initialise the Hann window
-	for i in range(freqDecimation):
-		hannWindow[i] = pow(sin(pi * i / freqDecimation), 2)
+	#for i in range(freqDecimation):
+	#	hannWindow[i] = pow(sin(pi * i / freqDecimation), 2)
 
 
 	# Being actually processing data
 	if stokesVT and stokesIT:
-		printf("Processing StoKes I and Stokes V...\n")
+		printf("Processing Stokes I and Stokes V...\n")
 		t1 = time.time()
 
 
@@ -310,10 +332,10 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 					#Yr = structuredFileData_view[j][i][2]
 					#Yi = structuredFileData_view[j][i][3]
 
-					inVarX[filterbankIdx][0] = structuredFileData_view[j][i][0] * hannWindow[filterbankIdx]
-					inVarX[filterbankIdx][1] = structuredFileData_view[j][i][1] * hannWindow[filterbankIdx]
-					inVarY[filterbankIdx][0] = structuredFileData_view[j][i][2] * hannWindow[filterbankIdx]
-					inVarY[filterbankIdx][1] = structuredFileData_view[j][i][3] * hannWindow[filterbankIdx]
+					inVarX[filterbankIdx][0] = structuredFileData_view[j][i][0] #* hannWindow[filterbankIdx]
+					inVarX[filterbankIdx][1] = structuredFileData_view[j][i][1] #* hannWindow[filterbankIdx]
+					inVarY[filterbankIdx][0] = structuredFileData_view[j][i][2] #* hannWindow[filterbankIdx]
+					inVarY[filterbankIdx][1] = structuredFileData_view[j][i][3] #* hannWindow[filterbankIdx]
 
 					if filterbankIdx == filterbankLim:
 						filterbankIdx = 0
@@ -416,10 +438,10 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 					#Yr = structuredFileData_view[j][i][2]
 					#Yi = structuredFileData_view[j][i][3]
 
-					inVarX[filterbankIdx][0] = structuredFileData_view[j][i][0] * hannWindow[filterbankIdx]
-					inVarX[filterbankIdx][1] = structuredFileData_view[j][i][1] * hannWindow[filterbankIdx]
-					inVarY[filterbankIdx][0] = structuredFileData_view[j][i][2] * hannWindow[filterbankIdx]
-					inVarY[filterbankIdx][1] = structuredFileData_view[j][i][3] * hannWindow[filterbankIdx]
+					inVarX[filterbankIdx][0] = structuredFileData_view[j][i][0] #* hannWindow[filterbankIdx]
+					inVarX[filterbankIdx][1] = structuredFileData_view[j][i][1] #* hannWindow[filterbankIdx]
+					inVarY[filterbankIdx][0] = structuredFileData_view[j][i][2] #* hannWindow[filterbankIdx]
+					inVarY[filterbankIdx][1] = structuredFileData_view[j][i][3] #* hannWindow[filterbankIdx]
 
 					if filterbankIdx == filterbankLim:
 						filterbankIdx = 0
@@ -488,7 +510,7 @@ cdef void processData(DTYPE_t_1* fileData, int threadCount, long packetCount, un
 
 	# Cleanup the allocated memory / fftw remnants
 	# Memviews are handled by the Python GC (unfortunatly, can't empty them early)
-	free(hannWindow)
+	#free(hannWindow)
 	free(inVarXArr)
 	free(inVarYArr)
 	free(outVarXArr)

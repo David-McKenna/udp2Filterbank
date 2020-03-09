@@ -1,3 +1,4 @@
+#!/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Created on Mon Dec 03 16:23:01 2018
@@ -16,6 +17,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument('-infile', dest='infile', help='set the input file name', default='')
 parser.add_argument('-start', type=int, dest='start', help='Byte to start reading from file')
 parser.add_argument('-readlength', type=int, dest='length', help='How many bytes to read')
+parser.add_argument('-p', type=int, dest='startport', help="Base UDP port to start filterbanking on (lowest channel)", default=16130)
+parser.add_argument('-n', type=int, dest='nports', help='Number of ports to process', default=1)
 parser.add_argument('-o', dest='outfile', help='Set outfile name', default='')
 
 parser.add_argument('-I', dest='stokesI', help='Enable Stokes I processing.', default=0)
@@ -29,6 +32,8 @@ parser.add_argument('-t', dest='threadCount', help='Set the number of threads to
 args      = parser.parse_args()
 infile    = args.infile
 outfile   = args.outfile
+startport = int(args.startport)
+nports    = int(args.nports)
 start     = int(args.start)
 length    = int(args.length)
 
@@ -47,7 +52,7 @@ startTime = datetime.utcnow()
 print('Raw to filterbank conversion started on ' + infile + ' at: ' + str(startTime)[0:19])
 print("Reading {} bytes starting at {}".format(length, start))
 
-udp.readFile(str.encode(infile), threads, start, length, stokesI, stokesV, timeSize, freqSize, str.encode(outfile))
+udp.readFile(str.encode(infile), str(startport), nports, threads, start, length, stokesI, stokesV, timeSize, freqSize, str.encode(outfile))
 
 endTime = datetime.utcnow()
 print('Raw to filterbank conversion completed on ' + infile + ' at: ' + str(datetime.utcnow())[0:19])

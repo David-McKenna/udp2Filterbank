@@ -189,7 +189,7 @@ endif
 # TODO: determine if we can just pipe the raw pipes into the Cython program for a significant speedup (1 less read/write op is a lot of time saved)
 if ( "$file" =~ *.zst ) then
     echo ""
-    echo "Compressed observation detected, decompressing to "$outfile'.port.decompressed'
+    echo "Compressed observation detected, decompressing to "$outfile'.decompressed'
     
     # ucc2 doesn't have zstd installed, fallback to self-compiled binaries
     set zstdcmd = `which zstd`
@@ -211,16 +211,10 @@ if ( "$file" =~ *.zst ) then
         endif
     endif
 
-    foreach portoff (`seq 0 1 $nports`)
-        set portid = `echo $startport $portoff | awk '{print $1 + $2}'`
-        $zstdcmd -d $file -o $outfile'.'$portid'.decompressed'
-        set mjdname = `echo $file | sed 's/.\{4\}$//'`
+    $zstdcmd -d $file -o $outfile'.decompressed'
+    set mjdname = `echo $file | sed 's/.\{4\}$//'`
+    set file = $outfile'.decompressed'
 
-        if ( $portid == 0 ) then
-            set file = $outfile'.'$portid'.decompressed'
-        endif
-
-    end
     echo ""
 else
     set mjdname = $file
@@ -258,9 +252,9 @@ set rawfilepatch = `echo $rawfilepatch | sed 's/\_data1//g'`
 set tmpstr=`dump_filetime_mjd.py -infile $mjdname | grep MJD:`
 set MJD=`echo $tmpstr | grep -o -E '[0-9.]+'`
 set fo = `echo -0.1953125 $fftWindow | awk '{print $1/$2}'`
-set nchan = `echo 122 $fftWindow $nports | awk '{print $1*$2*$3}'`
+set nchan = `echo 122 $fftWindow | awk '{print $1*$2}'`
 set tsamp = `echo 0.00000512 $fftWindow $timeWindow | awk '{print $1 * $2 * $3}'`
-set npols = `echo $stokesI $stokesV | awk '{print $1 + $2 }'`
+set npols = `echo $stokesI $stokesV | awk '{print $1 +$2 }'`
 
 echo "Patched File Name = "$rawfilepatch
 echo "Obs. MJD =  "$MJD

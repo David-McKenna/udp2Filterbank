@@ -8,7 +8,7 @@ udp2FilExt = [
 	Extension( 	"",
 			 	sources = ["./cyUdp2fil.pyx"],
 				libraries = ["fftw3f_threads", "fftw3f"],
-				library_dirs=["/home/dmckenna/bin/", "/home/dmckenna/bin/lib/", "/home/dmckenna/bin/include"], # ucc2 doesn't have fftw3, self compiled
+				library_dirs=["/home/dmckenna/bin/", "/home/dmckenna/bin/lib/", "/home/dmckenna/bin/include", "~/bin/", "~/bin/lib/", "~/bin/include/"], # ucc2 doesn't have fftw3, self compiled
 			 	extra_compile_args = ['-fopenmp', '-O3', '-march=native',  "-I/home/dmckenna/bin/include", "-lfftw3f_threads", "-lfftw3f", "-fPIC"],
 			 	extra_link_args = ["-fopenmp", "-lfftw3f_threads", "-lfftw3f"] )
 ]
@@ -17,5 +17,6 @@ udp2FilExt = [
 setup(name='ilofarCyxDataProcessor',
 	version='0.0.0',
 	description='BF UDP datastream to sigproc filterbank processor backend.',
-	ext_modules=cythonize(udp2FilExt))
+	ext_modules=cythonize(udp2FilExt),
+	scripts = ["./cli/dump_filename_mjd.py", "./cli/bf2fil.csh", "./cli/udp2fil_cywrapper.py", "./cli/mockHeader" ])
 

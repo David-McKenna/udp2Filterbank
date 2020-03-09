@@ -39,20 +39,23 @@ set file       = $argv[1]
 set npackets   = $argv[2]
 set mode       = $argv[3] # evan or olaf
 set ram_factor = $argv[4] # Set some kind of arbitrary nice-ness factor (sets what fraction of cpu cores/est. ram can be used)
-set fch1       = $argv[5] # set the frequency of the top channel
-set outfile    = $argv[6]
+set cpu_cores  = $argv[5]
+set fch1       = $argv[6] # set the frequency of the top channel
+set outfile    = $argv[7]
 
 echo "Parsing: "$file
 echo "Total Packets: "$npackets
 echo "Obs Mode: "$mode
 
-if ( $#argv > 6 ) then
-    set stokesI = $argv[7]
-    set stokesV = $argv[8]
+if ( $#argv > 7 ) then
+    set stokesI = $argv[8]
+    set stokesV = $argv[9]
 
     if ( $stokesI == $stokesV ) then
         if ( $stokesI == 0 ) then
-            echo "\033[5;31mERROR: You have to get some kind of Stokes output...\033[0m"
+            printf "\033[5;31m"
+            echo "ERROR: You have to get some kind of Stokes output..."
+            printf "\033[0m\n"
             goto marbh
         endif
     endif
@@ -61,9 +64,9 @@ else
     set stokesV = 0
 endif
 
-if ( $#argv == 10 ) then
-    set timeWindow = $argv[9]
-    set fftWindow = $argv[10]
+if ( $#argv > 9 ) then
+    set timeWindow = $argv[10]
+    set fftWindow = $argv[11]
     echo "Time averaged over "$timeWindow" steps"
     echo "Trading time for frequency resolution over "$fftWindow" steps."
 else 
@@ -71,17 +74,25 @@ else
     set fftWindow = 1
 endif
 
+if ( $#argv > 11 ) then
+    set startport = $argv[12]
+    set nports = $argv[13]
+    if ( $nports == "" ) then
+        set nports = 1
+    endif
+    echo "Processing "$nports"of standard data starting at port "$startport
+endif
 
-if ( $#argv == 11 ) then
-    set psrName = $argv[11]
+if ( $#argv > 13 ) then
+    set psrName = $argv[14]
     echo "Pulsar Name "$psrName
 else 
     set psrName = "J0000+0000"
 endif
 
-if ( $#argv == 13 ) then
-    set ra     = $argv[12]
-    set dec    = $argv[13]
+if ( $#argv > 14 ) then
+    set ra     = $argv[15]
+    set dec    = $argv[16]
     echo "RA="$ra
     echo "DEC="$dec
 else
@@ -89,13 +100,15 @@ else
     set dec = 0
 endif
 
-set tel = 11 # LOFAR in PRESTO/Sigproc.
+set tel = 11 # LOFAR faked in PRESTO/Sigproc.
 
 
 
 # Exit if the output file exists
 if ( -f $outfile ) then
-    echo "\033[5;41mOutput file "$outfile" already exists, exiting before we overwrite any data.\033[0m"
+    printf "\033[5;31m"
+    echo "Output file "$outfile" already exists, exiting before we overwrite any data."
+    printf "\033[0m\n"
     goto marbh
 endif
 
@@ -103,9 +116,13 @@ endif
 
 # What are we running on? How many CPU cores?
 set host = `uname`
-echo $host
-if ($host == "Darwin") then       # We're on a Mac
-    echo '\033[5;43m2019-10 Changes: Compatibility has not been tested, attempting to continue...\033[0m'
+echo "Host system: "$host
+if ( $host == "Darwin" ) then       # We're on a Mac
+    printf "\033[5;31m"
+    echo '2019-10 Changes: Compatibility has not been tested, attempting to continue...'
+    printf "\033[0m\n"
+    sleep 3
+
     set nprocessors = `sysctl -n hw.physicalcpu`
 else if ($host == "Linux") then   # We're on a Linux
     set nprocessors = `nproc`
@@ -121,7 +138,7 @@ echo 'You have '$ram' bytes of ram available.'
 echo 'We will plan to use less than '$ramcap' bytes.'
 
 echo "You have" $nprocessors "processors available."
-set ncores_avail = `echo $nprocessors | awk -v ram_factor=$ram_factor '{print int($1*ram_factor)}'`
+set ncores_avail = `echo $nprocessors | awk -v cpu_cores=$cpu_cores '{print int($1*cpu_cores)}'`
 echo "Using up to" $ncores_avail "of these."
 
 
@@ -148,6 +165,13 @@ endif
 # ucc2 doesn't have zstd installed, fallback to self-compiled binaries
 if(`which zstd` == "") then
     set zstdcmd = "/home/dmckenna/bin/zstd"
+
+    if ( -f $zstdcmd ) then 
+        echo $zstdcmd" exists; will be used."
+    else 
+        set zstdcmd = `printenv ZSTD_CMD`
+        echo $zstdcmd" exists; will be used."
+    endif
 else
     set zstdcmd = "zstd"
 endif
@@ -156,10 +180,19 @@ endif
 # REALTA doesn't have mockHeader on the path, fallback to self-compiled binaries
 if(`which mockHeader` == "") then
     set mockHeaderCmd = "/home/obs/Joe/realta_scripts/mockHeader/mockHeader"
+
+    if ( -f $mockHeaderCmd ) then
+        echo $mockHeaderCmd" exists; will be used."
+    else 
+        set mockHeaderCmd = `printenv MOCKHEADER_CMD`
+        echo $mockHeaderCmd" exists; will be used."
+    endif
 else
     set mockHeaderCmd = "mockHeader"
 endif
 
+
+# TODO: determine if we can just pipe the raw pipes into the Cython program for a significant speedup (1 less read/write op is a lot of time saved)
 if ( "$file" =~ *.zst ) then
     echo ""
     echo "Compressed observation detected, decompressing to "$outfile'.decompressed'
@@ -240,7 +273,7 @@ endif
 foreach loop (`seq 0 $nloops`)
     set hd = `echo $loop $chunksize | awk '{print $1*$2}'`
 
-    python3 ./udp2fil_cywrapper.py -infile $file -start $hd -readlength $chunksize -o $outfile -I $stokesI -V $stokesV -sumSize $timeWindow -fftSize $fftWindow -t $ncores_avail
+    python3 ./udp2fil_cywrapper.py -infile $file -start $hd -readlength $chunksize -o $outfile -I $stokesI -V $stokesV -sumSize $timeWindow -fftSize $fftWindow -t $ncores_avail -p $startport -n $nports
 
 end
 

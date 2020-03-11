@@ -152,14 +152,14 @@ cpdef void readFile(char* fileLoc, char* portPattern, int ports, int threadCount
 	t1 = time.time()
 	for i in range(ports):
 		#t1 = time.time()
-		printf("Processing file %d...\n", i)
+		printf("Processing file %d, offloading data to offset %ld...\n", i, sizeof(DTYPE_t_1) * i * charSize)
 		fileRef = fileRefs[i]
 
 		# nogil = No python memory locks
 		with nogil:
 			fseek(fileRef, readStart, SEEK_SET)
 
-			if not fread(fileData + sizeof(DTYPE_t_1) * ports * charSize, 1, charSize, fileRef):
+			if not fread(fileData + sizeof(DTYPE_t_1) * i * charSize, 1, charSize, fileRef):
 				raise IOError(f"Unable to read file at {fileLoc}")
 
 		fclose(fileRef)
@@ -215,7 +215,7 @@ cdef void processData(DTYPE_t_1* fileData, int ports, int threadCount, long pack
 	cdef int mirror = 0
 	cdef int port, beamletBase
 
-	cdef DTYPE_t_2 *hannWindow = <DTYPE_t_2*>malloc(sizeof(DTYPE_t_2) * freqDecimation)
+	#cdef DTYPE_t_2 *hannWindow = <DTYPE_t_2*>malloc(sizeof(DTYPE_t_2) * freqDecimation)
 	cdef DTYPE_t_2 pi = np.pi
 
 	cdef long i, iSet, baseOffset, beamletIdx, __

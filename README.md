@@ -56,7 +56,8 @@ csh bf2fil.csh [pcap_filename] [npackets] [mode] [ram_factor] [cpu_factor] [fch1
 #### output_filename [str]
 - Location to save the processed output to.
 
-##Optional Parameters
+### Optional Parameters
+
 #### stokesI [0/1], stokesV [0/1]
 - Choose which stokes vectors filterbanks to produce.
 

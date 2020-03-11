@@ -11,6 +11,7 @@ submodules-local:
 python-local:
 	rm cyUdp2fil.c; exit 0
 	python3 ./setup.py install --user
+	chmod +x ./cli/*
 	cp ./cli/* ~/.local/bin/
 
 submodules:
@@ -20,4 +21,5 @@ submodules:
 python:
 	rm cyUdp2fil.c; exit 0
 	python3 ./setup.py install
+	chmod +x ./cli/*
 	cp ./cli/* /usr/local/bin/

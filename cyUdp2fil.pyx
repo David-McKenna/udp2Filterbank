@@ -20,7 +20,7 @@ from cython.parallel cimport prange
 
 # Import C native functions
 from libc.stdio cimport fseek, fread, fwrite, ftell, fopen, fclose, FILE, SEEK_SET, SEEK_END, printf, sprintf
-from libc.stdlib cimport malloc, free
+from libc.stdlib cimport malloc, free, calloc
 from libc.string cimport memcpy
 from libc.math cimport pow, sin
 
@@ -91,7 +91,7 @@ cdef void writeData(DTYPE_t_2[:, :, ::1] dataSet, long long dataLength, char out
 
 # Main read function: handles getting all data from disk into memory.
 cpdef void readFile(char* fileLoc, char* portPattern, int ports, int threadCount, long long readStart, long long readLength, unsigned char stokesIT, unsigned char stokesVT, int timeDecimation, int freqDecimation, char* outputLoc):
-	print("Checking input parameters...")
+	printf("\nVerifiyng input parameters...\n\n")
 	ports = max(1, ports)
 
 	# Standard sanity checks.
@@ -107,23 +107,22 @@ cpdef void readFile(char* fileLoc, char* portPattern, int ports, int threadCount
 	if (readLength < -1):
 		raise RuntimeError(f"Issue with input Parameter: readStart, {readLength}")
 
-	cdef object t1, t2
-	cdef long long charSize
+	cdef object t0, t1, t2, t3, dt
+
+	cdef long long charSize = 9223372036854775806
 	cdef int i
 	cdef DTYPE_t_1* fileData
 	cdef FILE* fileRef
-	cdef FILE** fileRefs = <FILE**> malloc(sizeof(fileRef) * ports)
-	cdef char* baseName
+	cdef FILE** fileRefs = <FILE**> malloc(sizeof(FILE*) * ports)
 
-	#cpdef object t0, t3
-	#cpdef double dt
-	print("Checking files...")
+	printf("Beinging file read checks...\n\n")
 	for i in range(ports):
 		fileTemp = str.encode(fileLoc.decode("utf-8").replace(portPattern.decode('utf-8'), str(int(portPattern.decode('utf-8')) + i)))
-		print("Attempting to open file for port {} at {}....".format(str(int(portPattern.decode('utf-8')) + i), fileTemp))
+		print("Attempting to open file for port {} at {}....".format(str(int(portPattern.decode('utf-8')) + i), fileTemp.decode('utf-8')))
 		fileRefs[i] = fopen(fileTemp, 'r')
 	
 		if (fileRefs[i] == NULL):
+			printf("\033[5;31m\xf0\x9f\x9b\x91	ERROR: Unable to open file!\033[0m\n")
 			raise RuntimeError(f"Unable to open file at {fileTemp}")
 
 		# Check file length against requested read length -- different ports may have different numbers of packets
@@ -133,66 +132,72 @@ cpdef void readFile(char* fileLoc, char* portPattern, int ports, int threadCount
 
 		# Handle the case where we are asked to read beyond the EOF
 		if readLength > charSize - readStart:
-			printf("ERROR: File is %lld bytes long but you want to read %lld bytes from %lld.\n", charSize, readLength, readStart)
-			charSize = charSize - readStart
-			printf("ERROR: READ LENGTH TOO LONG\nERROR: Changing read length to EOF after %lld bytes\n", charSize)
+			printf("\033[5;31m\xf0\x9f\x9b\x91	ERROR: File is %lld bytes long but you want to read %lld bytes from %lld.\033[0m\n", charSize, readLength, readStart)
+			readLength = charSize - readStart
+			printf("\033[5;31m\xf0\x9f\x9b\x91	ERROR: READ LENGTH TOO LONG\nERROR: Changing read length to EOF after %lld bytes.\033[0m\n", readLength)
 		else:
-			charSize = readLength
+			printf("File read successfully and is long enough for provided readsize of %lld bytes.\n\n", readLength)
 
-
-	cdef long long packetCount = charSize // 7824 # Divide by the length of a standard UDP packet
-	printf("Begining Data Read...\n\n")
+	cdef long long packetCount = readLength // 7824 # Divide by the length of a standard UDP packet
+	printf("File read checks complete; we will be scanning %lld packets into %lld bytes from each input file.\n", packetCount, readLength * sizeof(DTYPE_t_1))
 
 	# Initialise memory for our data, setup memviews
 	# Cython requires empties be setup if we are going to define a variable,
 	# 	so file 1 element arrays for the unused shape.
 
-	fileData = <DTYPE_t_1*> malloc(charSize * ports * sizeof(DTYPE_t_1))
+	printf("\n\nAllocating %lld bytes to store raw data...\n", readLength * ports * sizeof(DTYPE_t_1))
+	fileData = <DTYPE_t_1*> malloc(readLength * ports * sizeof(DTYPE_t_1))
 
-	t1 = time.time()
+	printf("\n\n\nBegining Data Read...\n\n")
+	t0 = time.time()
 	for i in range(ports):
-		#t1 = time.time()
-		printf("Processing file %d, offloading data to offset %ld...\n", i, sizeof(DTYPE_t_1) * i * charSize)
+		t1 = time.time()
+		printf("Reading file %d, offloading %ld bytes to offset %ld...\n", i, readLength, sizeof(DTYPE_t_1) * i * readLength)
 		fileRef = fileRefs[i]
 
 		# nogil = No python memory locks
 		with nogil:
 			fseek(fileRef, readStart, SEEK_SET)
 
-			if not fread(fileData + sizeof(DTYPE_t_1) * i * charSize, 1, charSize, fileRef):
+			if not fread(fileData + sizeof(DTYPE_t_1) * i * readLength, 1, readLength, fileRef):
 				raise IOError(f"Unable to read file at {fileLoc}")
 
 		fclose(fileRef)
 
-		#t2 = time.time()
-		printf("Successfully Read %lld Packets into %lld bytes.\n", packetCount, charSize * sizeof(DTYPE_t_1))
+		t2 = time.time()
+		dt = t2 - t1
+		printf("Successfully Read %lld Packets into %lld bytes.\n", packetCount, readLength * sizeof(DTYPE_t_1))
+		print("This took {:.2f} seconds, with a read speed of {:.2f}MB/s".format(dt, readLength * sizeof(DTYPE_t_1) / 1024 / 1024 / dt))
+		printf("\n")
 
 	free(fileRefs)
-	t2 = time.time()
-	cdef object dt = t2 - t1
+	t3 = time.time()
+	dt = t3 - t0
 	printf("\n\n")
 	printf("Data reading complete for all ports.\n")
-	printf("Successfully Read All Data, %lld Packets into %lld bytes.\n", packetCount * ports, ports * charSize * sizeof(DTYPE_t_1))
-	print("This took {:.2f} seconds, giving an overall read speed of {:.2f}MB/s".format(dt, charSize * ports / 1024 / 1024 / dt))
+	printf("Successfully Read All Data, %lld Packets into %lld bytes.\n", packetCount * ports, ports * readLength * sizeof(DTYPE_t_1))
+	print("This took {:.2f} seconds, giving an overall read speed of {:.2f}MB/s".format(dt, readLength * ports * sizeof(DTYPE_t_1) / 1024 / 1024 / dt))
 	printf("\n\n\n")
 
 
 	# Assume our output location is less than 1k characters long...
 	cdef char[1000] outputF
 	cdef char[1000] outputF2
+	cdef char[1000] outputLocCopy
 
 	if outputLoc == b"":
-		if stokesIT and stokesVT:
-			sprintf(outputF, "%s_stokesI.fil.tmp", fileLoc)
-			sprintf(outputF2, "%s_stokesV.fil.tmp", fileLoc)
-		else:
-			sprintf(outputF, "%s.tmp", fileLoc)	
+		sprintf(outputLocCopy, "%s.tmp.fil", fileLoc)
 	else:
-		if stokesIT and stokesVT:
-			sprintf(outputF, "%s_stokesI.fil", outputLoc)
-			sprintf(outputF2, "%s_stokesV.fil", outputLoc)
-		else:
-			sprintf(outputF, "%s", outputLoc)
+		sprintf(outputLocCopy, "%s", outputLoc)
+
+	if stokesIT and stokesVT:
+		sprintf(outputF, "%s_stokesI.fil", outputLocCopy)
+		sprintf(outputF2, "%s_stokesV.fil", outputLocCopy)
+		printf("Data will be saved to %s and %s once processing is finished.\n\n", outputF, outputF2)
+	else:
+		sprintf(outputF, "%s", outputLocCopy)
+		printf("Data will be saved to %s once processing is finished.\n\n", outputF)
+
 
 
 	# fileData is free'd in this function
@@ -234,7 +239,10 @@ cdef void processData(DTYPE_t_1* fileData, int ports, int threadCount, long pack
 	cdef fftwf_complex *outVarY
 	cdef fftwf_plan fftPlanY
 
+	#cdef unsigned char* progressArr = <unsigned char*> calloc(beamletCount, sizeof(unsigned char))
+
 	printf("Output expected to be %lld bytes long, from %ld packets and %d modes.\n", dataLength * sizeof(DTYPE_t_2), packetCount, stokesIT + stokesVT)
+	printf("Allocating memory for processing operations...\n")
 
 
 	# Initialise memory for our data, setup memviews
@@ -290,7 +298,7 @@ cdef void processData(DTYPE_t_1* fileData, int ports, int threadCount, long pack
 
 	# Change the memory from time continuous to beam continuous
 	# This is simply to make my life easier while creating this script.
-	printf("Restructuring the dataset in memory...\n")
+	printf("\n\nRestructuring the dataset in memory...\n")
 
 	for port in range(ports):
 		for i in prange(packetCount, nogil = True, schedule = 'guided', num_threads = threadCount):
@@ -309,6 +317,7 @@ cdef void processData(DTYPE_t_1* fileData, int ports, int threadCount, long pack
 					structuredFileData_view[beamletBase - 1 - j][timeIdx][3] += fileData[beamletIdx + kSet + 3] # Yi
 
 	# Release the raw data.
+	printf("Releasing raw file data...\n")
 	free(fileData)
 
 
@@ -318,6 +327,7 @@ cdef void processData(DTYPE_t_1* fileData, int ports, int threadCount, long pack
 
 
 	# Being actually processing data
+	printf("\n\n\nBegining processing...\n\n")
 	if stokesVT and stokesIT:
 		printf("Processing Stokes I and Stokes V...\n")
 		t1 = time.time()
@@ -325,7 +335,12 @@ cdef void processData(DTYPE_t_1* fileData, int ports, int threadCount, long pack
 
 		# Handle the frequency/time tradeoff
 		if freqDecimation > 1:
+			printf("Begining Stokes formation and channelisation process...\n")
 			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
+				
+				#progressArr[j] = 1
+				#progress(progressArr, beamletCount, 0)
+				
 				filterbankIdx = 0
 				filterbankLim = freqDecimation - 1
 				timeIdx = 0
@@ -371,6 +386,11 @@ cdef void processData(DTYPE_t_1* fileData, int ports, int threadCount, long pack
 						filterbankIdx = filterbankIdx + 1
 
 				# Cleanup fftw memory objects
+				#progressArr[j] = 2
+				#progress(progressArr, beamletCount, 0)
+				
+				printf("Beam %d processing completed.\n", j)
+
 				fftwf_destroy_plan(fftPlanX)
 				fftwf_destroy_plan(fftPlanY)
 				fftwf_free(inVarX)
@@ -378,21 +398,39 @@ cdef void processData(DTYPE_t_1* fileData, int ports, int threadCount, long pack
 				fftwf_free(outVarX)
 				fftwf_free(outVarY)
 
+			#time.sleep(1)
+			#progress(progressArr, beamletCount, 1)
+			printf(".\nChannelisation complete, cleaning up FFTW artefacts...\n")
 			fftwf_cleanup_threads()
-
 		else:
 			# Just process the Stokes values if we aren't doing a frequency trade off
+			printf("Forming Stokes parameters...\n")
 			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
+				
+				#progressArr[j] = 1
+				#progress(progressArr, beamletCount, 0)
+				
 				for i in range(timeSteps):
 					stokesDual_view[0][i][j] = stokesI(structuredFileData_view[j][i][0], structuredFileData_view[j][i][1], structuredFileData_view[j][i][2], structuredFileData_view[j][i][3])
 					stokesDual_view[1][i][j] = stokesV(structuredFileData_view[j][i][0], structuredFileData_view[j][i][1], structuredFileData_view[j][i][2], structuredFileData_view[j][i][3])
-
+				
+				#progressArr[j] = 2
+				#progress(progressArr, beamletCount, 0)
+				printf("Beam %d processing completed.\n", j)
+			#time.sleep(1)
+			#progress(progressArr, beamletCount, 1)
+			printf(".\nStokes parameter formation complete.\n")
 		# Account for reduced time steps from frequency trade offs
 		timeSteps /= freqDecimation
 
 		# Sum over time if we are decimating the data
 		if timeDecimation > 1:
+			printf("\n\nBegining time decimation...\n")
 			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
+				
+				#progressArr[j] = 1
+				#progress(progressArr, beamletCount, 0)
+				
 				timeIdx = 0
 				combinedSteps = 1
 				for i in range(timeSteps):
@@ -404,6 +442,14 @@ cdef void processData(DTYPE_t_1* fileData, int ports, int threadCount, long pack
 						timeIdx = timeIdx + 1
 					else:
 						combinedSteps = combinedSteps + 1
+				
+				#progressArr[j] = 2
+				#progress(progressArr, beamletCount, 0)
+				printf("Beam %d processing completed.\n", j)
+
+			#time.sleep(1)
+			#progress(progressArr, beamletCount, 1)
+			printf(".\nTime decimation complete.\n")
 
 		else:
 			stokesDualOut_view = stokesDual_view
@@ -413,6 +459,7 @@ cdef void processData(DTYPE_t_1* fileData, int ports, int threadCount, long pack
 
 		t1 = time.time()
 		# Write the results to disk
+		printf("Writing results to disk...\n")
 		writeData(stokesDualOut_view, dataLength, &outputLoc[0], &outputLoc2[0])
 
 	else:
@@ -432,9 +479,14 @@ cdef void processData(DTYPE_t_1* fileData, int ports, int threadCount, long pack
 
 		t1 = time.time()
 
-		# Handle the frequency/time tradeoff
+		# Handle the frequency/time tradeoff. Speedup from splitting up the stokes I/V combined method is noticable.
 		if freqDecimation > 1:
+			printf("Begining Stokes formation and channelisation process...\n")
 			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
+				
+				#progressArr[j] = 1
+				#progress(progressArr, beamletCount, 0)
+
 				filterbankIdx = 0
 				filterbankLim = freqDecimation - 1
 				timeIdx = 0
@@ -477,27 +529,54 @@ cdef void processData(DTYPE_t_1* fileData, int ports, int threadCount, long pack
 						filterbankIdx = filterbankIdx + 1
 
 				# Cleanup fftw memory objects on a per-beam basis
+				#progressArr[j] = 2
+				#progress(progressArr, beamletCount, 0)
+
+				printf("Beam %d processing completed.\n", j)
+
 				fftwf_destroy_plan(fftPlanX)
 				fftwf_destroy_plan(fftPlanY)
 				fftwf_free(inVarX)
 				fftwf_free(inVarY)
 				fftwf_free(outVarX)
 				fftwf_free(outVarY)
-
+			
+			time.sleep(1)
+			#progress(progressArr, beamletCount, 1)
+			printf(".\nChannelisation complete, cleaning up FFTW artefacts...\n")
+			
 			fftwf_cleanup_threads()
+
 		else:
 			# Just process the Stokes value if we aren't doing a frequency trade off
+			printf("Forming Stokes parameters...\n")
 			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
+				
+				#progressArr[j] = 1
+				#progress(progressArr, beamletCount, 0)
+				
 				for i in range(timeSteps):
 					stokesSingle_view[i][j] = stokesFunc(structuredFileData_view[j][i][0], structuredFileData_view[j][i][1], structuredFileData_view[j][i][2], structuredFileData_view[j][i][3])
-
+				
+				#progressArr[j] = 2
+				#progress(progressArr, beamletCount, 0)
+				#
+				printf("Beam %d processing completed.\n", j)
+			#time.sleep(1)
+			#progress(progressArr, beamletCount, 1)
+			printf(".\nStokes parameter formation complete.\n")
 
 		# Account for reduced time steps from frequency trade offs
 		timeSteps /= freqDecimation
 
 		# Sum over time if we are decimating the data
 		if timeDecimation > 1:
+			printf("\n\nBegining time decimation...\n")
 			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
+				
+				#progressArr[j] = 1
+				#progress(progressArr, beamletCount, 0)
+				
 				timeIdx = 0
 				combinedSteps = 1
 				for i in range(timeSteps):
@@ -508,6 +587,13 @@ cdef void processData(DTYPE_t_1* fileData, int ports, int threadCount, long pack
 						timeIdx = timeIdx + 1
 					else:
 						combinedSteps = combinedSteps + 1
+				
+				#progressArr[j] = 2
+				#progress(progressArr, beamletCount, 0)
+				printf("Beam %d processing completed.\n", j)
+			#time.sleep(1)
+			#progress(progressArr, beamletCount, 1)
+			printf(".\nTime decimation complete.\n")
 
 		else:
 			stokesSingleOut_view = stokesSingle_view
@@ -517,6 +603,7 @@ cdef void processData(DTYPE_t_1* fileData, int ports, int threadCount, long pack
 
 		t1 = time.time()
 		# Write the results to disk.
+		printf("\n\nWriting results to disk...\n")
 		writeDataShrunk(stokesSingleOut_view, dataLength, &outputLoc[0])
 
 	t2 = time.time()
@@ -532,3 +619,29 @@ cdef void processData(DTYPE_t_1* fileData, int ports, int threadCount, long pack
 	free(outVarYArr)
 	free(fftPlanXArr)
 	free(fftPlanYArr)
+
+"""
+cdef int progress(unsigned char * progressArr, int itersCount) nogil:
+	
+	cdef int i;
+	cdef int compCounter;
+	cdef int workCounter;
+	for i in range(itersCount):
+		if i % 4 == 0:
+			printf("\n")
+		if (progressArr[i] == 2):
+			printf("%03d: \033[42mCompleted.\033[49m\t\t", i)
+			counter += 1
+		elif (progressArr[i] == 1):
+			printf("%03d: \033[44mWorking...\033[49m\t\t", i)
+
+
+	progressArr[beamletCount + 1] = 0
+	printf("\n\n\n")
+	if (counter == itersCount):
+		free(progressArr)
+		progressArr = <unsigned char*> calloc(beamletCount + 1, sizeof(unsigned char))
+		return 1
+
+	return 0
+"""

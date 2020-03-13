@@ -30,7 +30,7 @@
 
 if ($#argv < 6) then
     printf "\033[1;33mUsage:\033[0m"
-    echo "csh bf2fil.csh [pcap_filename] [npackets] [mode] [ram_factor] [cpu_factor] [fch1] [output_filename] (optional parameters are [stokesI (0/1)] [stokesV (0/1)] [time_averaging_length] [frequency_FFT_window] [startport] [number of ports] [pulsar name] [RA](J2000, format hh:mm:ss.ddd) [DEC] (J2000, format dd.mm.ss.ddd))"
+    echo "csh bf2fil.csh [pcap_filename] [npackets] [mode] [ram_factor] [cpu_factor] [fch1] [output_filename] (optional parameters are [stokesI (0/1)] [stokesV (0/1)] [time_averaging_length] [frequency_FFT_window] [startport] [number of ports] [pulsar name] [RA](J2000, format hh:mm:ss.ddd) [DEC] (J2000, format dd.mm.ss.ddd)) [telescope_id]"
     goto marbh
 endif
 
@@ -58,7 +58,11 @@ if ( $#argv > 7 ) then
             echo "ERROR: You have to get some kind of Stokes output..."
             printf "\033[0m\n"
             goto marbh
+        else 
+            set stokesBoth = 1
         endif
+    else 
+        set stokesBoth = 0
     endif
 else
     set stokesI = 1
@@ -104,7 +108,11 @@ else
     set dec = 0
 endif
 
-set tel = 11 # LOFAR faked in PRESTO/Sigproc.
+if ( $#argv > 16 ) then
+    set telescope_id = $argv[17]
+else
+    set telescope_id = 1916 # Damnit Evan... Default code for IE613 in sigproc/presto
+endif
 
 
 
@@ -125,6 +133,11 @@ if ( -f $outfile ) then
     exists:
     printf "\033[5;31m"
     echo "Output file "$outfile" already exists, exiting before we overwrite any data."
+    printf "\033[0m\n"
+    goto marbh
+else if ( -f $outfile".sigprochdr" ) then
+    printf "\033[5;31m"
+    echo "Output header "$outfile".sigprochdr already exists, exiting before we overwrite any data."
     printf "\033[0m\n"
     goto marbh
 endif
@@ -282,6 +295,7 @@ set npols = `echo $stokesI $stokesV | awk '{print $1 + $2 }'`
 
 echo "Patched File Name = "$rawfilepatch
 echo "Obs. MJD =  "$MJD
+echo "Telescope ID = "$telescope_id
 echo "Top channel: "$fch1"MHz"
 echo "Channel Width: "$fo"MHz"
 echo "Channel Count: "$nchan
@@ -291,22 +305,34 @@ echo ""
 
 
 if ( $ra == 0 ) then
-    echo "$mockHeaderCmd -raw $rawfilepatch -tel $tel -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits 32 -tstart $MJD -nifs $npols -source $psrName $outfile'.sigprochdr'"
-    $mockHeaderCmd -raw $rawfilepatch -tel $tel -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits 32 -tstart $MJD -nifs $npols -source $psrName $outfile".sigprochdr"
+    echo "$mockHeaderCmd -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits 32 -tstart $MJD -nifs 1 -source $psrName $outfile'.sigprochdr'"
+    $mockHeaderCmd -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits 32 -tstart $MJD -nifs 1 -source $psrName $outfile".sigprochdr"
 
 else
-    echo "$mockHeaderCmd -raw $rawfilepatch -tel $tel -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits 32 -tstart $MJD -nifs $npols -ra $ra -dec $dec -source $psrName $outfile'.sigprochdr'"
-    $mockHeaderCmd -raw $rawfilepatch -tel $tel -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits 32 -tstart $MJD -nifs $npols -ra $ra -dec $dec -source $psrName $outfile".sigprochdr"
+    echo "$mockHeaderCmd -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits 32 -tstart $MJD -nifs 1 -ra $ra -dec $dec -source $psrName $outfile'.sigprochdr'"
+    $mockHeaderCmd -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits 32 -tstart $MJD -nifs 1 -ra $ra -dec $dec -source $psrName $outfile".sigprochdr"
 
+endif
+
+if ( ! -f $outfile.sigprochdr ) then
+        printf "\033[5;31m"
+        echo 'Unable to find mockHeader header, processing must have failed, exiting...'
+        printf "\033[0m\n"
+        goto marbh
 endif
 
 if ( $stokesI == 1 ) then
         cat $outfile".sigprochdr" > $outfile"_stokesI.fil"
+        if ( $stokesBoth == 0 ) then
+            set outfile = $outfile"_stokesI.fil"
+        endif
 endif
 if ( $stokesV == 1 ) then
         cat $outfile".sigprochdr" > $outfile"_stokesV.fil"
+        if ( $stokesBoth == 0 ) then
+            set outfile = $outfile"_stokesV.fil"
+        endif
 endif
-
 
 
 

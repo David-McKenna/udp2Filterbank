@@ -53,7 +53,7 @@ print('Raw to filterbank conversion started on ' + infile + ' at: ' + str(startT
 print("Reading {} bytes starting at {}".format(length, start))
 
 #udp.readFile(str.encode("testfil.fil.16130.decompressed"), str.encode("16130"), 4, 1, 0, 78240000, 1, 1, 1, 32, str.encode("test"))
-
+#print(f"Library call: cyUdp2fil.readFile(str.encode({infile}), str.encode({startport}), {nports}, {threads}, {start}, {length}, {stokesI}, {stokesV}, {timeSize}, {freqSize}, str.encode({outfile}))")
 udp.readFile(str.encode(infile), str.encode(startport), nports, threads, start, length, stokesI, stokesV, timeSize, freqSize, str.encode(outfile))
 
 endTime = datetime.utcnow()

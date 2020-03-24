@@ -302,8 +302,8 @@ cdef void processData(DTYPE_t_1* fileData, int ports, int threadCount, long pack
 
 	for port in range(ports):
 		for i in prange(packetCount, nogil = True, schedule = 'guided', num_threads = threadCount):
-			baseOffset = packetCount * (ports - port - 1) + udpPacketLength * i + udpHeaderLength
-			beamletBase = rawBeamletCount * (port + 1)
+			baseOffset = udpPacketLength * (packetCount * port) + udpPacketLength * i + udpHeaderLength
+			beamletBase = beamletCount - (rawBeamletCount * port)
 
 			for j in range(rawBeamletCount):
 				beamletIdx = baseOffset + j * scans * 4

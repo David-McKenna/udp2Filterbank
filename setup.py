@@ -15,7 +15,7 @@ udp2FilExt = [Extension(        "",
 
 
 setup(name='ilofarCyxDataProcessor',
-        version='0.0.0',
+        version='0.0.2',
         description='BF UDP datastream to sigproc filterbank processor backend.',
         ext_modules=cythonize(udp2FilExt),
         install_requires=["cython", "numpy", "astropy"])

@@ -335,11 +335,11 @@ if ( $stokesV == 1 ) then
 endif
 
 
-
+set wrappercmd = `which udp2fil_cywrapper.py`
 foreach loop (`seq 0 $nloops`)
     set hd = `echo $loop $chunksize | awk '{print $1*$2}'`
 
-    set wrappercmd = `which udp2fil_cywrapper.py`
+    echo "Iteration "$loop" of "$nloops
     echo "bash -c 'python3 $wrappercmd -infile $readfile -start $hd -readlength $chunksize -o $outfile -I $stokesI -V $stokesV -sumSize $timeWindow -fftSize $fftWindow -t $ncores_avail -p $startport -n $nports'"
     bash -c "python3 $wrappercmd -infile $readfile -start $hd -readlength $chunksize -o $outfile -I $stokesI -V $stokesV -sumSize $timeWindow -fftSize $fftWindow -t $ncores_avail -p $startport -n $nports"
 

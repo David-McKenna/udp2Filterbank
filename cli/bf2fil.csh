@@ -28,9 +28,22 @@
 #   to read / process / write the data to a single output file. Also adds in time/
 #   frequency tradeoffs for dealing with shorter period / higher DM pulsars.
 
+
+set testval = `echo 1000000000001 | awk --bignum '{print $1*2}'`
+if ( $testval != 2000000000002 ) then
+    printf "\033[5;31m"
+    echo "The installed awk version is not complying with '--bignum', we cannot procced."
+    printf "\033[0m\n"
+    echo "You mayneed to upgrade your awk version, we require (g)awk>=4.1"
+    echo "Your current version: "
+    awk -Wversion
+    goto marbh
+endif
+
+
 if ($#argv < 6) then
     printf "\033[1;33mUsage:\033[0m"
-    echo "csh bf2fil.csh [pcap_filename] [npackets] [mode] [ram_factor] [cpu_factor] [fch1] [output_filename] (optional parameters are [stokesI (0/1)] [stokesV (0/1)] [time_averaging_length] [frequency_FFT_window] [startport] [number of ports] [pulsar name] [RA](J2000, format hh:mm:ss.ddd) [DEC] (J2000, format dd.mm.ss.ddd)) [telescope_id]"
+    echo "csh bf2fil.csh [pcap_filename] [npackets] [mode] [ram_factor] [cpu_factor] [fch1] [output_filename] (optional parameters are [stokesI (0/1)] [stokesV (0/1)] [time_averaging_length] [frequency_FFT_window] [startport] [number of ports] [source name] [RA](J2000, format hh:mm:ss.ddd) [DEC] (J2000, format dd.mm.ss.ddd)) [telescope_id]"
     goto marbh
 endif
 
@@ -93,7 +106,7 @@ echo "Processing "$nports" ports of standard data starting at port "$startport
 
 if ( $#argv > 13 ) then
     set psrName = $argv[14]
-    echo "Pulsar Name "$psrName
+    echo "Source Name "$psrName
 else 
     set psrName = "J0000+0000"
 endif
@@ -112,7 +125,10 @@ if ( $#argv > 16 ) then
     set telescope_id = $argv[17]
 else
     set telescope_id = 1916 # Damnit Evan... Default code for IE613 in sigproc/presto
+    echo "Defaulting to internal I-LOFAR telescope ID (1916)"
 endif
+
+echo "TelID="$telescope_id
 
 
 
@@ -161,8 +177,8 @@ endif
 
 
 # What resources are available?
-set ram = `grep MemTotal /proc/meminfo | awk '{print $2*1024}'` # Get total RAM in bytes
-set ramcap = `echo $ram | awk -v ram_factor=$ram_factor '{print int($1*ram_factor)}'`
+set ram = `grep MemTotal /proc/meminfo | awk --bignum '{print $2*1024}'` # Get total RAM in bytes
+set ramcap = `echo $ram | awk --bignum -v ram_factor=$ram_factor '{print int($1*ram_factor)}'`
 
 echo 'You have '$ram' bytes of ram available.'
 echo 'We will plan to use less than '$ramcap' bytes.'
@@ -258,9 +274,9 @@ endif
 
 
 # Determine the size of each execution
-set memal = `echo $packet_size $npackets $nports | awk '{print 2*$1*$2*$3}'` # 3 seems like a slightly overboard prediction comapred to runs, but theoretically it should
+set memal = `echo $packet_size $npackets $nports | awk --bignum '{print 2*$1*$2*$3}'` # 3 seems like a slightly overboard prediction comapred to runs, but theoretically it should
                                                                   # be closer to 4-5 but runtime is normally ~ 2-3.
-set data_cap = `echo $ram | awk -v ram_factor=$ram_factor '{print $1*ram_factor}'`
+set data_cap = `echo $ram | awk --bignum -v ram_factor=$ram_factor '{print $1*ram_factor}'`
 set nloops = `echo $data_cap $memal | awk '{print int($2/$1)}'`
 set nloopsprint = `echo $data_cap $memal | awk '{print int($2/$1)+1}'` # True lazy mode
 
@@ -268,9 +284,9 @@ echo ""
 echo 'Processing data in '$nloopsprint' segments.'
 
 # Known issue: final chunk is not handled gracefully here; Cython code should be able to handle it through.
-set packets_per_chunk = `echo $npackets $nloopsprint | awk '{print int($1/$2)}'`
-set chunksize = `echo $packets_per_chunk $packet_size | awk '{print $1*$2}'`
-set total_data = `echo $packet_size $npackets | awk '{print $1*$2}'`
+set packets_per_chunk = `echo $npackets $nloopsprint | awk --bignum '{print int($1/$2)}'`
+set chunksize = `echo $packets_per_chunk $packet_size | awk --bignum '{print $1*$2}'`
+set total_data = `echo $packet_size $npackets | awk --bignum '{print $1*$2}'`
 
 echo "Processing "$packets_per_chunk" packets every execution, giving a chunksize of "$chunksize
 echo ""
@@ -337,7 +353,7 @@ endif
 
 set wrappercmd = `which udp2fil_cywrapper.py`
 foreach loop (`seq 0 $nloops`)
-    set hd = `echo $loop $chunksize | awk '{print $1*$2}'`
+    set hd = `echo $loop $chunksize | awk --bignum '{print $1*$2}'`
 
     echo "Iteration "$loop" of "$nloops
     echo "bash -c 'python3 $wrappercmd -infile $readfile -start $hd -readlength $chunksize -o $outfile -I $stokesI -V $stokesV -sumSize $timeWindow -fftSize $fftWindow -t $ncores_avail -p $startport -n $nports'"

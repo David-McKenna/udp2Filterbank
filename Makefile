@@ -37,8 +37,8 @@ submodules:
 	cd mockHeader; make; cp ./mockHeader /usr/local/bin/
 
 python:
-	sudo pip3 install setuptools cython astropy
+	pip3 install setuptools cython astropy
 	rm cyUdp2fil.c; exit 0
-	sudo python3 ./setup.py install
+	python3 ./setup.py install
 	chmod +x ./cli/*
-	sudo cp ./cli/* /usr/local/bin/
+	cp ./cli/* /usr/local/bin/

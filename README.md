@@ -22,6 +22,8 @@ A Makefile is provided with two options, installing the system to the local user
 
 This will checkout and build the mockHeader repo, compile the Cython code and copy all the resulting modules and scripts to the relevant location for later usage. The CLI scripts and mockHeader should be available on your path after running `make`.
 
+**We will also assume you have a (G)awk version greater than 4.1; bf2fil.csh has a check to ensure that this is true and will not run otherwise (we need '--bignum' support for file byte location references).**
+
 Usage
 -----
 While the python library can be directly called, it is significnatly easier to reference the bf2fil.csh script to ensure the sigproc header is properly added and all memory/cpu usage restrictions are met.

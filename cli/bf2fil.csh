@@ -178,10 +178,10 @@ endif
 
 # What resources are available?
 set ram = `grep MemTotal /proc/meminfo | awk --bignum '{print $2*1024}'` # Get total RAM in bytes
-set ramcap = `echo $ram | awk --bignum -v ram_factor=$ram_factor '{print int($1*ram_factor)}'`
+set data_cap = `echo $ram | awk --bignum -v ram_factor=$ram_factor '{print int($1*ram_factor)}'`
 
 echo 'You have '$ram' bytes of ram available.'
-echo 'We will plan to use less than '$ramcap' bytes.'
+echo 'We will plan to use less than '$data_cap' bytes.'
 
 echo "You have" $nprocessors "processors available."
 set ncores_avail = `echo $nprocessors | awk -v cpu_cores=$cpu_cores '{print int($1*cpu_cores)}'`
@@ -275,19 +275,21 @@ endif
 
 # Determine the size of each execution
 set memal = `echo $packet_size $npackets $nports | awk --bignum '{print 2*$1*$2*$3}'` # 3 seems like a slightly overboard prediction comapred to runs, but theoretically it should
-                                                                  # be closer to 4-5 but runtime is normally ~ 2-3.
-set data_cap = `echo $ram | awk --bignum -v ram_factor=$ram_factor '{print $1*ram_factor}'`
+                                                                                      # be closer to 4-5 but runtime is normally ~ 2-3.
 set nloops = `echo $data_cap $memal | awk '{print int($2/$1)}'`
 set nloopsprint = `echo $data_cap $memal | awk '{print int($2/$1)+1}'` # True lazy mode
 
-echo ""
-echo 'Processing data in '$nloopsprint' segments.'
 
-# Known issue: final chunk is not handled gracefully here; Cython code should be able to handle it through.
-set packets_per_chunk = `echo $npackets $nloopsprint | awk --bignum '{print int($1/$2)}'`
+# Known issue: final chunk is not handled gracefully here; Cython code should be able to handle it though.
+set packets_per_chunk = `echo $npackets $nloopsprint $timeWindow $fftWindow | awk --bignum '{print int($1/$2)-(int($1/$2)%($3*$4))}'`
 set chunksize = `echo $packets_per_chunk $packet_size | awk --bignum '{print $1*$2}'`
 set total_data = `echo $packet_size $npackets | awk --bignum '{print $1*$2}'`
 
+set nloops = `echo $npackets $packets_per_chunk | awk '{print int($1/$2)}'`
+set nloopsprint = `echo $npackets $packets_per_chunk | awk '{print int($1/$2)+1}'` # True lazy mode
+
+echo ""
+echo 'Processing data in '$nloopsprint' segments.'
 echo "Processing "$packets_per_chunk" packets every execution, giving a chunksize of "$chunksize
 echo ""
 

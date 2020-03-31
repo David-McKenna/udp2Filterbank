@@ -152,7 +152,7 @@ cpdef void readFile(char* fileLoc, char* portPattern, int ports, int threadCount
 	t0 = time.time()
 	for i in range(ports):
 		t1 = time.time()
-		printf("Reading file %d, offloading %ld bytes to offset %ld...\n", i, readLength, sizeof(DTYPE_t_1) * i * readLength)
+		printf("Reading file %d, offloading %lld bytes to offset %lld...\n", i, readLength, sizeof(DTYPE_t_1) * i * readLength)
 		fileRef = fileRefs[i]
 
 		# nogil = No python memory locks
@@ -181,8 +181,8 @@ cpdef void readFile(char* fileLoc, char* portPattern, int ports, int threadCount
 
 
 	# Assume our output location is less than 1k characters long...
-	cdef char[1000] outputF
-	cdef char[1000] outputF2
+	cdef char[1024] outputF
+	cdef char[1024] outputF2
 	cdef char[1000] outputLocCopy
 
 	if outputLoc == b"":
@@ -229,7 +229,7 @@ cdef void processData(DTYPE_t_1* fileData, int ports, int threadCount, long pack
 	cdef long timeIdx = 0
 	cdef long timeSteps = packetCount * scans
 
-	cdef long long dataLength = int(packetCount * (beamletCount) * (scans / timeDecimation) * (stokesIT + stokesVT)) # freqDecimation has a 1:1 transfer between time/freq, so no effect on output size.
+	cdef long long dataLength = int(packetCount * (beamletCount) * (float(scans) / float(timeDecimation)) * (stokesIT + stokesVT)) # freqDecimation has a 1:1 transfer between time/freq, so no effect on output size.
 
 	cdef fftwf_complex *inVarX
 	cdef fftwf_complex *outVarX

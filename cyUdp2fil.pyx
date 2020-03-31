@@ -210,6 +210,8 @@ cdef void processData(DTYPE_t_1* fileData, int ports, int threadCount, long pack
 
 	cdef unsigned char Xr, Xi, Yr, Yi
 
+	freqDecimation = max(freqDecimation, 1) # Sanitise input
+
 	cdef int j, k, kSet, l, offsetIdx, idx1, idx2, combinedSteps
 	cdef int rawBeamletCount = 122
 	cdef int beamletCount = rawBeamletCount * ports
@@ -426,7 +428,7 @@ cdef void processData(DTYPE_t_1* fileData, int ports, int threadCount, long pack
 		# Sum over time if we are decimating the data
 		if timeDecimation > 1:
 			printf("\n\nBegining time decimation...\n")
-			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
+			for j in prange(beamletCount * freqDecimation, nogil = True, schedule = 'guided', num_threads = threadCount):
 				
 				#progressArr[j] = 1
 				#progress(progressArr, beamletCount, 0)
@@ -572,7 +574,7 @@ cdef void processData(DTYPE_t_1* fileData, int ports, int threadCount, long pack
 		# Sum over time if we are decimating the data
 		if timeDecimation > 1:
 			printf("\n\nBegining time decimation...\n")
-			for j in prange(beamletCount, nogil = True, schedule = 'guided', num_threads = threadCount):
+			for j in prange(beamletCount * freqDecimation, nogil = True, schedule = 'guided', num_threads = threadCount):
 				
 				#progressArr[j] = 1
 				#progress(progressArr, beamletCount, 0)

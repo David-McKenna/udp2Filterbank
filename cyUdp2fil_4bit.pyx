@@ -184,6 +184,7 @@ cpdef void readFile(char* fileLoc, char* portPattern, int ports, int threadCount
 
 	printf("Unpacking 4-bit data to 8-bit unsigned ints...\n")
 	cdef long iIdx = 0
+	cdef DTYPE_1_t workingChar
 	with nogil:
 		for i in range(readLength * ports * sizeof(DTYPE_t_1)):
 			workingChar = fileData[iIdx]

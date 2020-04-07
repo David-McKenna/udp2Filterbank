@@ -112,6 +112,7 @@ cpdef void readFile(char* fileLoc, char* portPattern, int ports, int threadCount
 	cdef long long charSize = 9223372036854775806
 	cdef int i
 	cdef DTYPE_t_1* fileData
+	cdef DTYPE_t_1* fileData_unprocessed
 	cdef FILE* fileRef
 	cdef FILE** fileRefs = <FILE**> malloc(sizeof(FILE*) * ports)
 
@@ -146,7 +147,9 @@ cpdef void readFile(char* fileLoc, char* portPattern, int ports, int threadCount
 	# 	so file 1 element arrays for the unused shape.
 
 	printf("\n\nAllocating %lld bytes to store raw data...\n", readLength * ports * sizeof(DTYPE_t_1))
-	fileData = <DTYPE_t_1*> malloc(readLength * ports * sizeof(DTYPE_t_1))
+	fileData_unprocessed = <DTYPE_t_1*> malloc(readLength * ports * sizeof(DTYPE_t_1))
+	printf("\n\nAllocating %lld bytes to store extracted 4-bit raw data...\n", 2 * readLength * ports * sizeof(DTYPE_t_1))
+	fileData = <DTYPE_t_1*> malloc(2 * readLength * ports * sizeof(DTYPE_t_1))
 
 	printf("\n\n\nBegining Data Read...\n\n")
 	t0 = time.time()
@@ -159,7 +162,7 @@ cpdef void readFile(char* fileLoc, char* portPattern, int ports, int threadCount
 		with nogil:
 			fseek(fileRef, readStart, SEEK_SET)
 
-			if not fread(fileData + sizeof(DTYPE_t_1) * i * readLength, 1, readLength, fileRef):
+			if not fread(fileData_unprocessed + sizeof(DTYPE_t_1) * i * readLength, 1, readLength, fileRef):
 				raise IOError(f"Unable to read file at {fileLoc}")
 
 		fclose(fileRef)
@@ -178,6 +181,14 @@ cpdef void readFile(char* fileLoc, char* portPattern, int ports, int threadCount
 	printf("Successfully Read All Data, %lld Packets into %lld bytes.\n", packetCount * ports, ports * readLength * sizeof(DTYPE_t_1))
 	print("This took {:.2f} seconds, giving an overall read speed of {:.2f}MB/s".format(dt, readLength * ports * sizeof(DTYPE_t_1) / 1024 / 1024 / dt))
 	printf("\n\n\n")
+
+	printf("Unpacking 4-bit data to 8-bit unsigned ints...\n")
+	cdef long iIdx = 0
+	with nogil:
+		for i in range(readLength * ports * sizeof(DTYPE_t_1)):
+			workingChar = fileData[iIdx]
+			fileData[2 * iIdx] = 	 (workingChar & 240) >> 4
+			fileData[2 * iIdx + 1] = (workingChar & 15)
 
 
 	# Assume our output location is less than 1k characters long...
@@ -213,7 +224,7 @@ cdef void processData(DTYPE_t_1* fileData, int ports, int threadCount, long pack
 	freqDecimation = max(freqDecimation, 1) # Sanitise input
 
 	cdef int j, k, kSet, l, offsetIdx, idx1, idx2, combinedSteps
-	cdef int rawBeamletCount = 122
+	cdef int rawBeamletCount = 244
 	cdef int beamletCount = rawBeamletCount * ports
 	cdef int scans = 16
 	cdef int filterbankIdx = 0

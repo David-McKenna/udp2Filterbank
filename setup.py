@@ -6,7 +6,7 @@ from setuptools import setup, Extension
 from Cython.Build import cythonize
 
 udp2FilExt = [Extension(        "",
-                                sources = ["./cyUdp2fil.pyx"],
+                                sources = ["./cyUdp2fil_4bit.pyx"],
                                 libraries = ["fftw3f_threads", "fftw3f"],
                                 #library_dirs=["/home/dmckenna/bin/", "/home/dmckenna/bin/lib/", "/home/dmckenna/bin/include", "~/bin/", "~/bin/lib/", "~/bin/include/"], # ucc2 doesn't have fftw3, self compiled
                                 extra_compile_args = ['-fopenmp', '-O3', '-march=native', "-lfftw3f_threads", "-lfftw3f", "-fPIC"],
@@ -14,8 +14,8 @@ udp2FilExt = [Extension(        "",
 ]
 
 
-setup(name='ilofarCyxDataProcessor',
-        version='0.0.2',
+setup(name='ilofarCyxDataProcessor__4bit',
+        version='0.0.2__4bitmod',
         description='BF UDP datastream to sigproc filterbank processor backend.',
         ext_modules=cythonize(udp2FilExt),
         install_requires=["cython", "numpy", "astropy"])

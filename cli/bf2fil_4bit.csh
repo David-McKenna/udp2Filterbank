@@ -307,7 +307,8 @@ set dumpCmd=`which dump_filename_mjd.py`
 set tmpstr=`$dumpCmd -infile $mjdname | grep MJD:`
 set MJD=`echo $tmpstr | grep -o -E '[0-9.]+'`
 set fo = `echo -0.1953125 $fftWindow | awk '{print $1/$2}'`
-set nchan = `echo 122 $fftWindow $nports | awk '{print $1*$2*$3}'`
+# Packets contain double the amount of beamlets in 4-bit mode
+set nchan = `echo 244 $fftWindow $nports | awk '{print $1*$2*$3}'`
 set tsamp = `echo 0.00000512 $fftWindow $timeWindow | awk '{print $1 * $2 * $3}'`
 set npols = `echo $stokesI $stokesV | awk '{print $1 + $2 }'`
 
@@ -353,7 +354,7 @@ if ( $stokesV == 1 ) then
 endif
 
 
-set wrappercmd = `which udp2fil_cywrapper.py`
+set wrappercmd = `which udp2fil_cywrapper_4bit.py`
 foreach loop (`seq 0 $nloops`)
     set hd = `echo $loop $chunksize | awk --bignum '{print $1*$2}'`
 

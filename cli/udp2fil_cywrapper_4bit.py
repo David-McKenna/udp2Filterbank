@@ -10,7 +10,7 @@ More arguments to handle expanded filterbanking script (start byte/length/stokes
 """
 import argparse
 from datetime import datetime, timedelta
-import cyUdp2fil as udp
+import cyUdp2fil_4bit as udp
 
 
 if __name__ == '__main__':
@@ -52,7 +52,7 @@ if __name__ == '__main__':
 
 	#udp.readFile(str.encode("testfil.fil.16130.decompressed"), str.encode("16130"), 4, 1, 0, 78240000, 1, 1, 1, 32, str.encode("test"))
 	#print(f"Library call: cyUdp2fil.readFile(str.encode({infile}), str.encode({startport}), {nports}, {threads}, {start}, {length}, {stokesI}, {stokesV}, {timeSize}, {freqSize}, str.encode({outfile}))")
-	udp.readFile(str.encode(infile), str.encode(startport), nports, threads, start, length, stokesI, stokesV, timeSize, freqSize, str.encode(outfile))
+	udp.read4BitFile(str.encode(infile), str.encode(startport), nports, threads, start, length, stokesI, stokesV, timeSize, freqSize, str.encode(outfile))
 
 	endTime = datetime.utcnow()
 	print('Raw to filterbank conversion completed on ' + infile + ' at: ' + str(datetime.utcnow())[0:19])

@@ -61,36 +61,13 @@ echo "Parsing: "$file
 echo "Total Packets: "$npackets
 echo "Obs Mode: "$mode
 
-if ( $#argv > 7 ) then
-    set stokesI = $argv[8]
-    set stokesV = $argv[9]
 
-    if ( $stokesI == $stokesV ) then
-        if ( $stokesI == 0 ) then
-            printf "\033[5;31m"
-            echo "ERROR: You have to get some kind of Stokes output..."
-            printf "\033[0m\n"
-            goto marbh
-        else 
-            set stokesBoth = 1
-        endif
-    else 
-        set stokesBoth = 0
-    endif
-else
-    set stokesI = 1
-    set stokesV = 0
-endif
+set stokesI = 1
+set stokesV = 0
 
-if ( $#argv > 9 ) then
-    set timeWindow = $argv[10]
-    set fftWindow = $argv[11]
-    echo "Time averaged over "$timeWindow" steps"
-    echo "Trading time for frequency resolution over "$fftWindow" steps."
-else 
-    set timeWindow = 1
-    set fftWindow = 1
-endif
+set timeWindow = 1
+set fftWindow = 1
+
 
 if ( $#argv > 11 ) then
     set startport = $argv[12]
@@ -132,16 +109,11 @@ echo "TelID="$telescope_id
 
 
 
-if ( $stokesI == 1 ) then
-        if ( -f $outfile"_stokesI.fil" ) then 
-            goto exists
-        endif
+
+if ( -f $outfile"_S0.rawfil" ) then 
+    goto exists
 endif
-if ( $stokesV == 1 ) then
-        if ( -f $outfile"_stokesV.fil" ) then 
-            goto exists
-        endif
-endif
+
 
 
 # Exit if the output file exists
@@ -339,21 +311,10 @@ if ( ! -f $outfile.sigprochdr ) then
         goto marbh
 endif
 
-if ( $stokesI == 1 ) then
-        cat $outfile".sigprochdr" > $outfile"_stokesI.fil"
-        if ( $stokesBoth == 0 ) then
-            set outfile = $outfile"_stokesI.fil"
-        endif
-endif
-if ( $stokesV == 1 ) then
-        cat $outfile".sigprochdr" > $outfile"_stokesV.fil"
-        if ( $stokesBoth == 0 ) then
-            set outfile = $outfile"_stokesV.fil"
-        endif
-endif
+touch $outfile
 
 
-set wrappercmd = `which udp2fil_cywrapper.py`
+set wrappercmd = `which udp2rawfil_cywrapper.py`
 foreach loop (`seq 0 $nloops`)
     set hd = `echo $loop $chunksize | awk --bignum '{print $1*$2}'`
 

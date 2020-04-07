@@ -10,7 +10,7 @@ More arguments to handle expanded filterbanking script (start byte/length/stokes
 """
 import argparse
 from datetime import datetime, timedelta
-import cyUdp2fil as udp
+import cyUdp2rawfil as udp
 
 
 if __name__ == '__main__':

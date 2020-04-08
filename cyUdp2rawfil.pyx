@@ -37,7 +37,7 @@ cdef void writeDataShrunk(DTYPE_t_1[:, ::1] dataSet, long long dataLength, char 
 	printf("Writing %lld output elements to %s\n", dataLength, outputLoc)
 	cdef FILE *outRef = fopen(outputLoc, 'a')
 	if (outRef != NULL):
-		fwrite(&dataSet[0,0,0], sizeof(DTYPE_t_1), dataLength, outRef) # Write as little endian, C order (last axis first)
+		fwrite(&dataSet[0,0], sizeof(DTYPE_t_1), dataLength, outRef) # Write as little endian, C order (last axis first)
 		fclose(outRef)
 	else:
 		printf("ERROR: UNABLE TO OPEN OUTFPUT FILE; EXITING")

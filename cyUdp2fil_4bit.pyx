@@ -185,12 +185,15 @@ cpdef void read4BitFile(char* fileLoc, char* portPattern, int ports, int threadC
 	printf("Unpacking 4-bit data to 8-bit unsigned ints...\n")
 	cdef long iIdx = 0
 	cdef DTYPE_t_1 workingChar
+	cdef long base
 	with nogil:
-		for i in range(readLength * ports * sizeof(DTYPE_t_1)):
-			workingChar = fileData[iIdx]
-			fileData[2 * iIdx] = 	 (workingChar & 240) >> 4
-			fileData[2 * iIdx + 1] = (workingChar & 15)
-
+		for base in prange(ports * sizeof(DTYPE_t_1) * 2, nogil = True, schedule = 'guided', num_threads = threadCount)
+		#for i in range(readLength * ports * sizeof(DTYPE_t_1)):
+			for i in range(base * (readLength / 2)):
+				workingChar = fileData[iIdx]
+				fileData[2 * iIdx] = 	 (workingChar & 240) >> 4
+				fileData[2 * iIdx + 1] = (workingChar & 15)
+			printf("Base %lld finished.", base)
 
 	# Assume our output location is less than 1k characters long...
 	cdef char[1024] outputF

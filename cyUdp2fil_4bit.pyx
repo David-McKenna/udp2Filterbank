@@ -189,7 +189,7 @@ cpdef void read4BitFile(char* fileLoc, char* portPattern, int ports, int threadC
 	for base in prange(ports * sizeof(DTYPE_t_1) * 16, nogil = True, schedule = 'guided', num_threads = threadCount):
 	#for i in range(readLength * ports * sizeof(DTYPE_t_1)):
 		for i in range(base * (readLength / 16), (base + 1) * (readLength / 16)):
-			if i % 100000000 = 0: printf("%lld, %lld", base, i)
+			if i % 100000000 == 0: printf("%lld, %lld", base, i)
 			workingChar = fileData[iIdx]
 			fileData[2 * iIdx] = 	 (workingChar & 240) >> 4
 			fileData[2 * iIdx + 1] = (workingChar & 15)

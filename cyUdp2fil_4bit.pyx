@@ -241,8 +241,8 @@ cdef void processData(DTYPE_t_1* fileData, int ports, int threadCount, long pack
 	cdef DTYPE_t_2 pi = np.pi
 
 	cdef long i, iSet, baseOffset, beamletIdx, __
-	cdef long udpPacketLength = 7824
-	cdef long udpHeaderLength = 16
+	cdef long udpPacketLength = 15648
+	cdef long udpHeaderLength = 32
 	cdef long timeIdx = 0
 	cdef long timeSteps = packetCount * scans
 

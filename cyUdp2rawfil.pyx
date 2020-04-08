@@ -33,7 +33,7 @@ ctypedef np.float32_t DTYPE_t_2
 
 
 # Define  data dumping unctions for different sizes outputs (1pol/2pol)
-cdef void writeDataShrunk(DTYPE_t_1[:, :, ::1] dataSet, long long dataLength, char outputLoc[]) nogil:
+cdef void writeDataShrunk(DTYPE_t_1[:, ::1] dataSet, long long dataLength, char outputLoc[]) nogil:
 	printf("Writing %lld output elements to %s\n", dataLength, outputLoc)
 	cdef FILE *outRef = fopen(outputLoc, 'a')
 	if (outRef != NULL):
@@ -165,10 +165,10 @@ cpdef void readFile(char* fileLoc, char* portPattern, int ports, int threadCount
 	structuredFileData2 = np.zeros((packetCount * scans, beamletCount), dtype = DTYPE_1)
 	structuredFileData3 = np.zeros((packetCount * scans, beamletCount), dtype = DTYPE_1)
 
-	cdef DTYPE_t_1[:, :, ::1] structuredFileData_view0 = structuredFileData0
-	cdef DTYPE_t_1[:, :, ::1] structuredFileData_view1 = structuredFileData1
-	cdef DTYPE_t_1[:, :, ::1] structuredFileData_view2 = structuredFileData2
-	cdef DTYPE_t_1[:, :, ::1] structuredFileData_view3 = structuredFileData3
+	cdef DTYPE_t_1[:, ::1] structuredFileData_view0 = structuredFileData0
+	cdef DTYPE_t_1[:, ::1] structuredFileData_view1 = structuredFileData1
+	cdef DTYPE_t_1[:, ::1] structuredFileData_view2 = structuredFileData2
+	cdef DTYPE_t_1[:, ::1] structuredFileData_view3 = structuredFileData3
 
 	printf("\n\nRemoving UDP headers in memory...\n")
 

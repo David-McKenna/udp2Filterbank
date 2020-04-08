@@ -135,6 +135,9 @@ cpdef void readFile(char* fileLoc, char* portPattern, int ports, int threadCount
 			printf("\033[5;31m\xf0\x9f\x9b\x91	ERROR: File is %lld bytes long but you want to read %lld bytes from %lld.\033[0m\n", charSize, readLength, readStart)
 			readLength = charSize - readStart
 			printf("\033[5;31m\xf0\x9f\x9b\x91	ERROR: READ LENGTH TOO LONG\nERROR: Changing read length to EOF after %lld bytes.\033[0m\n", readLength)
+		if readLength < 0:
+			printf("\033[5;31m\xf0\x9f\x9b\x91	FATAL ERROR: Calculated readLength is negative (%lld), exiting early.\033[0m\n", readLength)
+			exit(1)
 		else:
 			printf("File read successfully and is long enough for provided readsize of %lld bytes.\n\n", readLength)
 

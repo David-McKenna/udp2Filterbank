@@ -190,10 +190,11 @@ cpdef void read4BitFile(char* fileLoc, char* portPattern, int ports, int threadC
 	#for i in range(readLength * ports * sizeof(DTYPE_t_1)):
 		for j in range(base * (readLength / 16), (base + 1) * (readLength / 16)):
 			if j % 100000000 == 0: printf("%ld, %ld", base, j)
-			workingChar = fileData[j]
+			workingChar = fileData_unprocessed[j]
 			fileData[2 * j] =     (workingChar & 240) >> 4
 			fileData[2 * j + 1] = (workingChar & 15)
 		printf("Base %ld finished.", base)
+	free(fileData_unprocessed)
 
 	# Assume our output location is less than 1k characters long...
 	cdef char[1024] outputF

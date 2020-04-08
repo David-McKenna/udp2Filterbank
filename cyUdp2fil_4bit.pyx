@@ -90,7 +90,7 @@ cdef void writeData(DTYPE_t_2[:, :, ::1] dataSet, long long dataLength, char out
 
 
 # Main read function: handles getting all data from disk into memory.
-cpdef void readFile(char* fileLoc, char* portPattern, int ports, int threadCount, long long readStart, long long readLength, unsigned char stokesIT, unsigned char stokesVT, int timeDecimation, int freqDecimation, char* outputLoc):
+cpdef void read4BitFile(char* fileLoc, char* portPattern, int ports, int threadCount, long long readStart, long long readLength, unsigned char stokesIT, unsigned char stokesVT, int timeDecimation, int freqDecimation, char* outputLoc):
 	printf("\nVerifiyng input parameters...\n\n")
 	ports = max(1, ports)
 

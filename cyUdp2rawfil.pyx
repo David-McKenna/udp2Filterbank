@@ -175,7 +175,7 @@ cpdef void readFile(char* fileLoc, char* portPattern, int ports, int threadCount
 	for port in range(ports):
 		for iL in prange(packetCount, nogil = True, schedule = 'guided', num_threads = threadCount):
 			baseOffset = udpPacketLength * (packetCount * port) + udpPacketLength * iL + udpHeaderLength
-			beamletBase = beamletCount - (rawBeamletCount * port)
+			beamletBase = rawBeamletCount * port
 
 			for j in range(rawBeamletCount):
 				beamletIdx = baseOffset + j * scans * 4
@@ -183,10 +183,10 @@ cpdef void readFile(char* fileLoc, char* portPattern, int ports, int threadCount
 					# Filterbank expects the frequency to be reversed compared to input flow
 					kSet = k * 4
 					timeIdx = iL * scans + k
-					structuredFileData_view0[timeIdx][beamletBase - 1 - j] = fileData[beamletIdx + kSet] # Xr
-					structuredFileData_view1[timeIdx][beamletBase - 1 - j] = fileData[beamletIdx + kSet + 1] # Xi
-					structuredFileData_view2[timeIdx][beamletBase - 1 - j] = fileData[beamletIdx + kSet + 2] # Yr
-					structuredFileData_view3[timeIdx][beamletBase - 1 - j] = fileData[beamletIdx + kSet + 3] # Yi
+					structuredFileData_view0[timeIdx][beamletBase + j] = fileData[beamletIdx + kSet] # Xr
+					structuredFileData_view1[timeIdx][beamletBase + j] = fileData[beamletIdx + kSet + 1] # Xi
+					structuredFileData_view2[timeIdx][beamletBase + j] = fileData[beamletIdx + kSet + 2] # Yr
+					structuredFileData_view3[timeIdx][beamletBase + j] = fileData[beamletIdx + kSet + 3] # Yi
 
 	printf("Writing data block to disk...\n")
 	writeDataShrunk(structuredFileData_view0, dataLength, outputF0)

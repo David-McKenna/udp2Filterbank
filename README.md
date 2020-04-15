@@ -1,65 +1,77 @@
-udp2Filterbank
+udp2Filterbank: CDMT Edition
 ==============
 
 udp2Filterbank is a Cython-based backend script for processng LOFAR beamformed data streams recoreded with Olaf Wucknitz's (MPIfRA) VLBI recordering script to generate sigproc-style filterbanks. 
 
-Based on frontend work by Evan Keane (SKA) and further modified by Joe McCauley (TCD), a Cython backend was written to improve processing speed, while the bf2fil script was re-written to minimise rewrites that were previously taking place. It was used for performing high time resolution observations with the Irish LOFAR station.
+Based on frontend work by Evan Keane (SKA) and further modified by Joe McCauley (TCD), a Cython backend was written to improve processing speed, while the bf2fil script was re-written to minimise rewrites that were previously taking place. It is used for performing high time resolution observations with the Irish LOFAR station.
 
-A forked version of mockHeader is provided with safeguards that prevent header corruption from long path names.
+### This version has been modified to perform coherent dedispersion through a modified form of Cees Bassa's CDMT platform. This requires access to a CUDA GPU and always channelises data with a factor of 8 as a result.
 
 Caveats
 -------	
 
-* zstd binaries must be on the path or they will fallback to whatever is set at the ZSTD_CMD enviroment variable
-* [mockHeader](https://github.com/evanocathain/mockHeader) binaries must be on the path or they will fallback to MOCKHEADER_CMD enviroment variable
+* [zstd](https://github.com/facebook/zstd) binaries must be on the path if observations are compressed or they will fallback to the ZSTD_CMD enviroment variable
+* [mockHeader](https://github.com/evanocathain/mockHeader) binaries must be on the path (if not installed with our makefile) or they will fallback to MOCKHEADER_CMD enviroment variable
+* [cdmt](https://github.com/cbassa/cdmt) binaries must be on the path (if not installed with our makefile) or they will fall back to the CDMT_CMD enviroment variable
 
-### The setup.py will require editing to point at fftwf libraries if they are not available via ld on your system
-
+We provide modified versions of [mockHeader](https://github.com/David-McKenna/mockHeader) (with extra path length precauations) and [cdmt](https://github.com/David-McKenna/cdmt) (modified for taking fitlerbanks as an input rather than H5 files) which are tuned for these scripts and advise using the provided makefile to install them.
 
 Installation
 ------------
 A Makefile is provided with two options, installing the system to the local user directories (make all) or to the system (make all-global).
 
-This will checkout and build the mockHeader repo, compile the Cython code and copy all the resulting modules and scripts to the relevant location for later usage. The CLI scripts and mockHeader should be available on your path after running `make`.
+This will checkout and build the mockHeader and cdmt repos, compile the Cython code and copy all the resulting modules and scripts to the relevant location for later usage. The CLI scripts and mockHeader should be available on your path after running `make`.
 
 **We will also assume you have a (G)awk version greater than 4.1; bf2fil.csh has a check to ensure that this is true and will not run otherwise (we need '--bignum' support for file byte location references).**
 
 Usage
 -----
-While the python library can be directly called, it is significnatly easier to reference the bf2fil.csh script to ensure the sigproc header is properly added and all memory/cpu usage restrictions are met.
+While the python library can be directly called, it is significnatly easier to reference the **bf2fil_rawfil.csh** or **bf2rawfil_cdmt.csh** scripts to ensure the sigproc header is properly added and all memory/cpu usage restrictions are met.
+
+### Configuration File
+```
+csh bf2fil.csh [config_file_location]
+```
+A configuration file based on the ones provided in **config/** can be used to run the script. This is recommended for executions where you want to process split filterbanks (non-continuous frequencies between UDP ports, we do not support cases where ports are filled with data from non-continuous subbands).
+
+### Required Parameters
+```
+csh bf2fil.csh [execution_mode] [pcap_filename] [npackets] [ram_factor] [cpu_factor] [fch1] [output_filename]
 
 ```
-csh bf2fil.csh [pcap_filename] [npackets] [mode] [ram_factor] [cpu_factor] [fch1] [output_filename] \
-			   (optional parameters are [stokesI (0/1)] [stokesV (0/1)] \
-			   [time_averaging_length] [frequency_FFT_window] \
-			   [startport] [number of ports] \
-			   [target name] [RA](J2000, format hh:mm:ss.ddd) [DEC] (J2000, format dd.mm.ss.ddd))"
 
-```
+#### execution_mode [str, "standard", "4bit", "cdmt", "4bit-cdmt"]
+- Input/output data product type
 
 #### pcap_filename [str]
-- Input recorded data file to process. These can take the form of a processed pcap dump, raw or compressed with zstd. Provide the lowest frequency lane if processing multiple ports at once.
+- Input recorded data file to process. These can take the form of a processed pcap dump, raw or compressed with zstd. Provide the lowest frequency lane of a single output filterbank if processing multiple at once.
 
-#### npackets [int]
-- Upper limit of pakcets to process from the input file.
+#### npackets [int, 0+]
+- Upper limit of pakcets to process from the input file (backend should limit this if you overestimate the number of packets on any of the input files).
 
-#### mode [str ('evan' or 'olaf')]
-- Observing mode, backends created by Evan Keane ('evan') or Olaf Wucknitz ('olaf') are supported.
+#### ram_factor [float, 0.0-1.0]
+- Limits the about of RAM used to a fraction of the available RAM (recommended to keep usage below 100GB due to disk i/o hangs above this.)
 
-#### ram_factor [float]
-- Limits the maximum percentage of ram to ram_factor * system amount.
-
-#### cpu_factor [float]
-- Limits the number of CPU coresto a percentage of the available cores on the machine.
+#### cpu_factor [float, 0.0-1.0]
+- Limits the number of CPU cores to a fraction of the available cores on the machine.
 
 #### fch1 [float]
-- Frequency of the top channel in MHz.
+- Frequency of the top (bottom for cdmt) channel in MHz.
 
 #### output_filename [str]
-- Location to save the processed output to.
+- Location prefix to save the processed output to.
 
-### Optional Parameters
-
+## Optional Parameters
+### standard. 4bit
+```
+csh bf2fil.csh standard/4bit
+				[pcap_filename] [npackets] [ram_factor] [cpu_factor] [fch1] [output_filename] \
+			   	(optional parameters are [stokesI] [stokesV] \
+			   	[time_averaging_length] [frequency_FFT_window] \
+			   	[startport] [number of ports] \
+			   	[target name] \
+				[RA](J2000, format hh:mm:ss.ddd) [DEC] (J2000, format dd.mm.ss.ddd))"
+```
 #### stokesI [0/1], stokesV [0/1]
 - Choose which stokes vectors filterbanks to produce.
 
@@ -68,6 +80,31 @@ csh bf2fil.csh [pcap_filename] [npackets] [mode] [ram_factor] [cpu_factor] [fch1
 
 #### frequency_FFT_window [int, 1+]
 - Number of time samples to use as a fft window to perform channelisation.
+
+#### startport [int/str]
+- Set the number of the start port encase the regex fails (provide the lowest frequency lane to process).
+
+#### number_of_ports [int]
+- Number of incremental ports to process.
+
+#### target_name [str]
+- Name of the target source (or pointing) to save in the header
+
+#### ra [str, hh:mm:ss.ddd], dec [str, dd:mm:ss.ddd]
+- RA/DEC of pointing to save into the header.
+
+### cdmt, 4bit-cdmt
+```
+csh bf2fil.csh cdmt/4bit-cdmt
+				[pcap_filename] [npackets] [ram_factor] [cpu_factor] [fch1] [output_filename] \
+				[cdmt_params] \
+			   	[startport] [number of ports] \
+			   	[target name] \
+			   	[RA](J2000, format hh:mm:ss.ddd) [DEC] (J2000, format dd.mm.ss.ddd))"
+
+```
+#### cdmt_params [str]
+- Parameters to pass to cdmt (e.g., "-d 5.572,0.2,3 -N 4096 -n 512")
 
 #### startport [int/str]
 - Set the number of the start port encase the regex fails (provide the lowest frequency lane to process).

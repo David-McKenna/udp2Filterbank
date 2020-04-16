@@ -1,38 +1,56 @@
-udp2Filterbank: CDMT Edition
+udp2Filterbank
 ==============
 
 udp2Filterbank is a Cython-based backend script for processng LOFAR beamformed data streams recoreded with Olaf Wucknitz's (MPIfRA) VLBI recordering script to generate sigproc-style filterbanks. 
 
-Based on frontend work by Evan Keane (SKA) and further modified by Joe McCauley (TCD), a Cython backend was written to improve processing speed, while the bf2fil script was re-written to minimise rewrites that were previously taking place. It is used for performing high time resolution observations with the Irish LOFAR station.
+Based on frontend work by Evan Keane (SKA) and further modified by Joe McCauley (TCD), a Cython backend was written to improve processing speed, while the bf2fil script was re-written to minimise multiple read/writes that were previously taking place. It is used for performing high time resolution observations with the Irish LOFAR station.
 
-### This version has been modified to perform coherent dedispersion through a modified form of Cees Bassa's CDMT platform. This requires access to a CUDA GPU and always channelises data with a factor of 8 as a result.
+This setup also allows for the coherent dedispersion of data through a modified version of Cees Bassa's [CDMT](https://github.com/cbassa/cdmt) software.
 
-Caveats
+Requirements
 -------	
+### Prerequisits
+**(G)awk v4.1** or greater is required for full double precision / long int support in the filterbanking scripts.
 
-* [zstd](https://github.com/facebook/zstd) binaries must be on the path if observations are compressed or they will fallback to the ZSTD_CMD enviroment variable
-* [mockHeader](https://github.com/evanocathain/mockHeader) binaries must be on the path (if not installed with our makefile) or they will fallback to MOCKHEADER_CMD enviroment variable
-* [cdmt](https://github.com/cbassa/cdmt) binaries must be on the path (if not installed with our makefile) or they will fall back to the CDMT_CMD enviroment variable
+The **FFTW3 (and FFTW3F)** development library and zstd must be installed and available on the path to compile.
+
+Ubuntu-derivatives:
+```
+sudo apt install gawk libfftw3-dev libfftw3-single3 zstd
+```
 
 We provide modified versions of [mockHeader](https://github.com/David-McKenna/mockHeader) (with extra path length precauations) and [cdmt](https://github.com/David-McKenna/cdmt) (modified for taking fitlerbanks as an input rather than H5 files) which are tuned for these scripts and advise using the provided makefile to install them.
 
+If the zstd, mockHeader or cdmt binaries are not on the path then we will fall back to the enviroment variables *ZSTD_CMD*, *MOCKHEADER_CMD* and *CDMT_CMD*. The python wrapper scripts must always be on the path (by default, we install to *~/.local/bin/*). 
+
+#### CDMT (CUDA GPU)
+To use the CUDA component of this repo; you will need a GPU with the NVIDIA propriatary drivers and an install of CUDA (tested with 10.2) with [cuFFT](https://developer.nvidia.com/cufft) available on the path. You may need to modify the CDMT makefile to point at your CUDA install directory if is in not located in */usr/lib/cuda*.
+
 Installation
 ------------
-A Makefile is provided with two options, installing the system to the local user directories (make all) or to the system (make all-global).
+A Makefile is provided with four options, installing the system to the local user directories (*make all*), to the system (*make all-global*) and non-gpu versions of both (make *all-cpu all-global-cpu*).
 
-This will checkout and build the mockHeader and cdmt repos, compile the Cython code and copy all the resulting modules and scripts to the relevant location for later usage. The CLI scripts and mockHeader should be available on your path after running `make`.
-
-**We will also assume you have a (G)awk version greater than 4.1; bf2fil.csh has a check to ensure that this is true and will not run otherwise (we need '--bignum' support for file byte location references).**
+This will checkout and build the mockHeader and (if needed) cdmt repos, compile the Cython code and copy all the resulting modules and scripts to the relevant location for later usage. The CLI scripts and mockHeader should be available on your path after running `make <install type|all>`.
 
 Usage
 -----
-While the python library can be directly called, it is significnatly easier to reference the **bf2fil_rawfil.csh** or **bf2rawfil_cdmt.csh** scripts to ensure the sigproc header is properly added and all memory/cpu usage restrictions are met.
+While the python library can be directly called, it is significnatly easier to reference the **bf2filcsh** script to ensure the sigproc header is properly added and all memory/cpu usage restrictions are met.
 
-### Configuration File
+We recommend tuning the system to always leave at least 2 CPU cores free and use less than 50GB of RAM per iteration (higher values resulted in significantly slower disk read speeds during development).
+
+### Enviroment Variables
+Some enviroment variables are used to make the script fully non-interactive:
 ```
-csh bf2fil.csh [config_file_location]
+ZSTD_SKIP=1; ZSTD_CLEANUP=1; CDMT_CLEANUP=1; csh bf2fil.csh
 ```
-A configuration file based on the ones provided in **config/** can be used to run the script. This is recommended for executions where you want to process split filterbanks (non-continuous frequencies between UDP ports, we do not support cases where ports are filled with data from non-continuous subbands).
+#### ZSTD_SKIP [0/1]
+- Skip decompression if a file exists at the output location
+
+#### ZSTD_CLEANUP [0/1]
+- Cleanup decompression artefacts if true.
+
+#### CDMT_CLEANUP [0/1]
+- Cleanup intermediate raw udp filterbanks if true (keeps original header file)
 
 ### Required Parameters
 ```

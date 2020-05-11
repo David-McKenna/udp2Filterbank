@@ -13,6 +13,7 @@ submodules-local:
 	git submodule update --init --recursive
 	mkdir -p ~/.local/bin/
 	cd mockHeader; make; cp ./mockHeader ~/.local/bin/
+	cd cdmt; make cdmt_udp; cp ./cdmt_udp ~/.local/bin/
 
 python-local:
 	pip3 install setuptools cython astropy --user
@@ -35,6 +36,7 @@ python-ucc:
 submodules:
 	git submodule update --init --recursive
 	cd mockHeader; make; cp ./mockHeader /usr/local/bin/
+	cd cdmt; make cdmt_udp; cp ./cdmt_udp /usr/local/bin/
 
 python:
 	pip3 install setuptools cython astropy

@@ -10,7 +10,7 @@ reset:
 all-global: submodules python
 
 submodules-local:
-	git submodule update --init --recursive
+	git submodule update --init --force --remote
 	mkdir -p ~/.local/bin/
 	cd mockHeader; make; cp ./mockHeader ~/.local/bin/
 	cd cdmt; make cdmt_udp; cp ./cdmt_udp ~/.local/bin/
@@ -34,7 +34,7 @@ python-ucc:
 
 
 submodules:
-	git submodule update --init --recursive
+	git submodule update --init --force --remote
 	cd mockHeader; make; cp ./mockHeader /usr/local/bin/
 	cd cdmt; make cdmt_udp; cp ./cdmt_udp /usr/local/bin/
 

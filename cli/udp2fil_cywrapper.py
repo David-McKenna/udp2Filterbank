@@ -16,6 +16,7 @@ import cyUdp2fil as udp
 if __name__ == '__main__':
 	## Parse command line arguments & set default values
 	parser = argparse.ArgumentParser()
+	parser.add_argument('-mode', dest='mode', help='Proessing mode', default='')
 	parser.add_argument('-infile', dest='infile', help='set the input file name', default='')
 	parser.add_argument('-start', type=int, dest='start', help='Byte to start reading from file')
 	parser.add_argument('-readlength', type=int, dest='length', help='How many bytes to read')
@@ -32,6 +33,7 @@ if __name__ == '__main__':
 	parser.add_argument('-t', dest='threadCount', help='Set the number of threads to use when workload can be parallelised.', default=1)
 
 	args      = parser.parse_args()
+	mode 	  = args.mode
 	infile    = args.infile
 	outfile   = args.outfile
 	startport = str(args.startport)
@@ -47,12 +49,34 @@ if __name__ == '__main__':
 	threads = int(args.threadCount)
 
 	startTime = datetime.utcnow()
-	print('Raw to filterbank conversion started on ' + infile + ' at: ' + str(startTime)[0:19])
-	print("Reading {} bytes starting at {}".format(length, start))
 
+	try:
+		if mode in ['standard', '4bit']:
+			print('Raw to filterbank conversion started on ' + infile + ' at: ' + str(startTime)[0:19])
+			print("Reading {} bytes starting at {}".format(length, start))
+			if mode == 'standard':
+				udp.readFile(8, str.encode(infile), str.encode(startport), nports, threads, start, length, stokesI, stokesV, timeSize, freqSize, str.encode(outfile))
+			elif mode == '4bit':
+				udp.readFile(4, str.encode(infile), str.encode(startport), nports, threads, start, length, stokesI, stokesV, timeSize, freqSize, str.encode(outfile))
+
+		elif mode in ['cdmt', 'cdmt-4bit']:
+			print('Raw to split component filterbank conversion started on ' + infile + ' at: ' + str(startTime)[0:19])
+			print("Reading {} bytes starting at {}".format(length, start))
+
+			#cpdef void splitFile(int bitLevel, char* fileLoc, char* portPattern, int ports, int threadCount, long long readStart, long long readLength, char* outputLoc):
+			if mode == 'cdmt':
+				udp.splitFile(8, str.encode(infile), str.encode(startport), nports, threads, start, length, str.encode(outfile))
+
+			elif mode == 'cdmt-4bit':
+				udp.splitFile(4, str.encode(infile), str.encode(startport), nports, threads, start, length, str.encode(outfile))
+		else:
+			raise RuntimeError(f"Unknown processing mode supplied: {mode}")
+	except Error as err:
+		print(err)
+		exit(2)
+			
 	#udp.readFile(str.encode("testfil.fil.16130.decompressed"), str.encode("16130"), 4, 1, 0, 78240000, 1, 1, 1, 32, str.encode("test"))
 	#print(f"Library call: cyUdp2fil.readFile(str.encode({infile}), str.encode({startport}), {nports}, {threads}, {start}, {length}, {stokesI}, {stokesV}, {timeSize}, {freqSize}, str.encode({outfile}))")
-	udp.readFile(str.encode(infile), str.encode(startport), nports, threads, start, length, stokesI, stokesV, timeSize, freqSize, str.encode(outfile))
 
 	endTime = datetime.utcnow()
 	print('Raw to filterbank conversion completed on ' + infile + ' at: ' + str(datetime.utcnow())[0:19])

@@ -87,33 +87,44 @@ cdef void writeData(DTYPE_t_2[:, :, ::1] dataSet, long long dataLength, char out
 	writeDataShrunk(dataSet[1], dataLength / 2, outputLoc2)
 
 
+cdef void writeDataRaw(DTYPE_t_1[:, ::1] dataSet, long long dataLength, char outputLoc[]) nogil:
+	printf("Writing %lld output elements to %s\n", dataLength, outputLoc)
+	cdef FILE *outRef = fopen(outputLoc, 'a')
+	if (outRef != NULL):
+		fwrite(&dataSet[0,0], sizeof(DTYPE_t_1), dataLength, outRef) # Write as little endian, C order (last axis first)
+		fclose(outRef)
+	else:
+		printf("ERROR: UNABLE TO OPEN OUTFPUT FILE; EXITING")
 
 
 # Main read function: handles getting all data from disk into memory.
-cpdef void readFile(char* fileLoc, char* portPattern, int ports, int threadCount, long long readStart, long long readLength, unsigned char stokesIT, unsigned char stokesVT, int timeDecimation, int freqDecimation, char* outputLoc):
+cpdef void readFile(int bitLevel, char* fileLoc, char* portPattern, int ports, int threadCount, long long readStart, long long readLength, unsigned char stokesIT, unsigned char stokesVT, int timeDecimation, int freqDecimation, char* outputLoc):
 	printf("\nVerifiyng input parameters...\n\n")
 	ports = max(1, ports)
 
 	# Standard sanity checks.
+	if (bitLevel not in [4, 8]):		
+		raise RuntimeError(f"Issue with input Parameter: bitLevel, {bitLevel}")
 	if (timeDecimation <= 0):
 		raise RuntimeError(f"Issue with input Parameter: timeDecimation, {timeDecimation}")
 	if (freqDecimation <= 0):
-		raise RuntimeError(f"Issue with input Parameter: timeDecimation, {freqDecimation}")
+		raise RuntimeError(f"Issue with input Parameter: freqDecimation, {freqDecimation}")
 	if (not stokesIT and not stokesVT):
 		raise RuntimeError(f"Issue with input Parameter: neither Stokes I or V selected, {stokesIT}, {stokesVT}")
 	if (readStart < 0):
 		raise RuntimeError(f"Issue with input Parameter: readStart, {readStart}")
 
 	if (readLength < -1):
-		raise RuntimeError(f"Issue with input Parameter: readStart, {readLength}")
+		raise RuntimeError(f"Issue with input Parameter: readLength, {readLength}")
 
 	cdef object t0, t1, t2, t3, dt
 
 	cdef long long charSize = 9223372036854775806
 	cdef int i
-	cdef DTYPE_t_1* fileData
 	cdef FILE* fileRef
 	cdef FILE** fileRefs = <FILE**> malloc(sizeof(FILE*) * ports)
+	cdef DTYPE_t_1* fileData = NULL
+	cdef DTYPE_t_1* fileData_unprocessed
 
 	printf("Beinging file read checks...\n\n")
 	for i in range(ports):
@@ -149,7 +160,11 @@ cpdef void readFile(char* fileLoc, char* portPattern, int ports, int threadCount
 	# 	so file 1 element arrays for the unused shape.
 
 	printf("\n\nAllocating %lld bytes to store raw data...\n", readLength * ports * sizeof(DTYPE_t_1))
-	fileData = <DTYPE_t_1*> malloc(readLength * ports * sizeof(DTYPE_t_1))
+	fileData_unprocessed = <DTYPE_t_1*> malloc(readLength * ports * sizeof(DTYPE_t_1))
+
+	if bitLevel == 4:
+		printf("\n\nAllocating %lld bytes to store unpacked 4-bit data...\n", 2 * readLength * ports * sizeof(DTYPE_t_1))
+		fileData = <DTYPE_t_1*> malloc(2 * readLength * ports * sizeof(DTYPE_t_1))
 
 	printf("\n\n\nBegining Data Read...\n\n")
 	t0 = time.time()
@@ -162,7 +177,7 @@ cpdef void readFile(char* fileLoc, char* portPattern, int ports, int threadCount
 		with nogil:
 			fseek(fileRef, readStart, SEEK_SET)
 
-			if not fread(fileData + sizeof(DTYPE_t_1) * i * readLength, 1, readLength, fileRef):
+			if not fread(fileData_unprocessed + sizeof(DTYPE_t_1) * i * readLength, 1, readLength, fileRef):
 				raise IOError(f"Unable to read file at {fileLoc}")
 
 		fclose(fileRef)
@@ -182,6 +197,20 @@ cpdef void readFile(char* fileLoc, char* portPattern, int ports, int threadCount
 	print("This took {:.2f} seconds, giving an overall read speed of {:.2f}MB/s".format(dt, readLength * ports * sizeof(DTYPE_t_1) / 1024 / 1024 / dt))
 	printf("\n\n\n")
 
+	cdef DTYPE_t_1 workingChar
+	cdef long base, jLong
+	if bitLevel == 4:
+		printf("Unpacking 4-bit data to 8-bit unsigned ints...\n")
+		for base in prange(ports * sizeof(DTYPE_t_1) * 16, nogil = True, schedule = 'guided', num_threads = threadCount):
+		#for i in range(readLength * ports * sizeof(DTYPE_t_1)):
+			for jLong in range(base * (readLength / 16), (base + 1) * (readLength / 16)):
+				workingChar = fileData_unprocessed[jLong]
+				fileData[2 * jLong] =     (workingChar & 240) >> 4
+				fileData[2 * jLong + 1] = (workingChar & 15)
+			printf("Base %ld finished.\n", base)
+		free(fileData_unprocessed)
+	else:
+		fileData = fileData_unprocessed	
 
 	# Assume our output location is less than 1k characters long...
 	cdef char[1024] outputF
@@ -204,9 +233,9 @@ cpdef void readFile(char* fileLoc, char* portPattern, int ports, int threadCount
 
 
 	# fileData is free'd in this function
-	processData(fileData, ports, threadCount, packetCount, stokesIT, stokesVT, timeDecimation, freqDecimation, outputF, outputF2)
+	processData(bitLevel, fileData, ports, threadCount, packetCount, stokesIT, stokesVT, timeDecimation, freqDecimation, outputF, outputF2)
 
-cdef void processData(DTYPE_t_1* fileData, int ports, int threadCount, long packetCount, unsigned char stokesIT, unsigned char stokesVT, int timeDecimation, int freqDecimation, char* outputLoc, char* outputLoc2):
+cdef void processData(int bitLevel, DTYPE_t_1* fileData, int ports, int threadCount, long packetCount, unsigned char stokesIT, unsigned char stokesVT, int timeDecimation, int freqDecimation, char* outputLoc, char* outputLoc2):
 
 	# Initialise all variables.
 	cdef object t1, t2
@@ -216,7 +245,8 @@ cdef void processData(DTYPE_t_1* fileData, int ports, int threadCount, long pack
 	freqDecimation = max(freqDecimation, 1) # Sanitise input
 
 	cdef int j, k, kSet, l, offsetIdx, idx1, idx2, combinedSteps
-	cdef int rawBeamletCount = 122
+	cdef int bitOffset = 8 / bitLevel
+	cdef int rawBeamletCount = 122 * bitOffset
 	cdef int beamletCount = rawBeamletCount * ports
 	cdef int scans = 16
 	cdef int filterbankIdx = 0
@@ -229,8 +259,8 @@ cdef void processData(DTYPE_t_1* fileData, int ports, int threadCount, long pack
 	cdef DTYPE_t_2 pi = np.pi
 
 	cdef long i, iSet, baseOffset, beamletIdx, __
-	cdef long udpPacketLength = 7824
-	cdef long udpHeaderLength = 16
+	cdef long udpPacketLength = 7824 * bitOffset
+	cdef long udpHeaderLength = 16 * bitOffset
 	cdef long timeIdx = 0
 	cdef long timeSteps = packetCount * scans
 
@@ -650,3 +680,183 @@ cdef int progress(unsigned char * progressArr, int itersCount) nogil:
 
 	return 0
 """
+
+
+cpdef void splitFile(int bitLevel, char* fileLoc, char* portPattern, int ports, int threadCount, long long readStart, long long readLength, char* outputLoc):
+	printf("\nVerifiyng input parameters...\n\n")
+	ports = max(1, ports)
+
+	# Standard sanity checks.
+	if (bitLevel not in [4, 8]):
+		raise RuntimeError(f"Issue with input Parameter: bitLevel, {bitLevel}")
+	if (readStart < 0):
+		raise RuntimeError(f"Issue with input Parameter: readStart, {readStart}")
+
+	if (readLength < -1):
+		raise RuntimeError(f"Issue with input Parameter: readStart, {readLength}")
+
+	cdef int bitOffset = 8 / bitLevel
+	cdef object t0, t1, t2, t3, dt
+
+	cdef long long charSize = 9223372036854775806
+	cdef int i
+	cdef FILE* fileRef
+	cdef FILE** fileRefs = <FILE**> malloc(sizeof(FILE*) * ports)
+	cdef DTYPE_t_1* fileData
+	cdef DTYPE_t_1* fileData_unprocessed
+
+	printf("Beinging file read checks...\n\n")
+	for i in range(ports):
+		fileTemp = str.encode(fileLoc.decode("utf-8").replace(portPattern.decode('utf-8'), str(int(portPattern.decode('utf-8')) + i)))
+		print("Attempting to open file for port {} at {}....".format(str(int(portPattern.decode('utf-8')) + i), fileTemp.decode('utf-8')))
+		fileRefs[i] = fopen(fileTemp, 'r')
+	
+		if (fileRefs[i] == NULL):
+			printf("\033[5;31m\xf0\x9f\x9b\x91	ERROR: Unable to open file!\033[0m\n")
+			raise RuntimeError(f"Unable to open file at {fileTemp}")
+
+		# Check file length against requested read length -- different ports may have different numbers of packets
+		# 	due to packet loss, only save the shortest data length as the read target if needed.
+		fseek(fileRefs[i], 0, SEEK_END)
+		charSize = ftell(fileRefs[i]) # Get the length of the file
+
+		# Handle the case where we are asked to read beyond the EOF
+		if readLength > charSize - readStart:
+			printf("\033[5;31m\xf0\x9f\x9b\x91	ERROR: File is %lld bytes long but you want to read %lld bytes from %lld.\033[0m\n", charSize, readLength, readStart)
+			readLength = charSize - readStart
+			printf("\033[5;31m\xf0\x9f\x9b\x91	ERROR: READ LENGTH TOO LONG\nERROR: Changing read length to EOF after %lld bytes.\033[0m\n", readLength)
+		if readLength < 0:
+			printf("\033[5;31m\xf0\x9f\x9b\x91	FATAL ERROR: Calculated readLength is negative (%lld), exiting early.\033[0m\n", readLength)
+			exit(1)
+		else:
+			printf("File read successfully and is long enough for provided readsize of %lld bytes.\n\n", readLength)
+
+	cdef long long packetCount = readLength // 7824 # Divide by the length of a standard UDP packet
+	printf("File read checks complete; we will be scanning %lld packets into %lld bytes from each input file.\n", packetCount, readLength * sizeof(DTYPE_t_1))
+
+	# Initialise memory for our data, setup memviews
+	# Cython requires empties be setup if we are going to define a variable,
+	# 	so file 1 element arrays for the unused shape.
+
+	printf("\n\nAllocating %lld bytes to store raw data...\n", readLength * ports * sizeof(DTYPE_t_1))
+	fileData_unprocessed = <DTYPE_t_1*> malloc(readLength * ports * sizeof(DTYPE_t_1))
+
+	if bitLevel == 4:
+		printf("\n\nAllocating %lld bytes to store unpacked 4-bit data...\n", 2 * readLength * ports * sizeof(DTYPE_t_1))
+		fileData = <DTYPE_t_1*> malloc(2 * readLength * ports * sizeof(DTYPE_t_1))
+
+	printf("\n\n\nBegining Data Read...\n\n")
+	t0 = time.time()
+	for i in range(ports):
+		t1 = time.time()
+		printf("Reading file %d, offloading %lld bytes to offset %lld...\n", i, readLength, sizeof(DTYPE_t_1) * i * readLength)
+		fileRef = fileRefs[i]
+
+		# nogil = No python memory locks
+		with nogil:
+			fseek(fileRef, readStart, SEEK_SET)
+
+			if not fread(fileData_unprocessed + sizeof(DTYPE_t_1) * i * readLength, 1, readLength, fileRef):
+				raise IOError(f"Unable to read file at {fileLoc}")
+
+		fclose(fileRef)
+
+		t2 = time.time()
+		dt = t2 - t1
+		printf("Successfully Read %lld Packets into %lld bytes.\n", packetCount, readLength * sizeof(DTYPE_t_1))
+		print("This took {:.2f} seconds, with a read speed of {:.2f}MB/s".format(dt, readLength * sizeof(DTYPE_t_1) / 1024 / 1024 / dt))
+		printf("\n")
+
+	free(fileRefs)
+	t3 = time.time()
+	dt = t3 - t0
+	printf("\n\n")
+	printf("Data reading complete for all ports.\n")
+	printf("Successfully Read All Data, %lld Packets into %lld bytes.\n", packetCount * ports, ports * readLength * sizeof(DTYPE_t_1))
+	print("This took {:.2f} seconds, giving an overall read speed of {:.2f}MB/s".format(dt, readLength * ports * sizeof(DTYPE_t_1) / 1024 / 1024 / dt))
+	printf("\n\n\n")
+
+	cdef DTYPE_t_1 workingChar
+	cdef long base, jLong
+	if bitLevel == 4:
+		printf("Unpacking 4-bit data to 8-bit unsigned ints...\n")
+		for base in prange(ports * sizeof(DTYPE_t_1) * 16, nogil = True, schedule = 'guided', num_threads = threadCount):
+		#for i in range(readLength * ports * sizeof(DTYPE_t_1)):
+			for jLong in range(base * (readLength / 16), (base + 1) * (readLength / 16)):
+				workingChar = fileData_unprocessed[jLong]
+				fileData[2 * jLong] =     (workingChar & 240) >> 4
+				fileData[2 * jLong + 1] = (workingChar & 15)
+			printf("Base %ld finished.\n", base)
+		free(fileData_unprocessed)
+	else:
+		fileData = fileData_unprocessed
+
+	cdef char outputF0[2048]
+	cdef char outputF1[2048]
+	cdef char outputF2[2048]
+	cdef char outputF3[2048]
+	sprintf(outputF0, "%s_S0.rawfil", outputLoc)
+	sprintf(outputF1, "%s_S1.rawfil", outputLoc)
+	sprintf(outputF2, "%s_S2.rawfil", outputLoc)
+	sprintf(outputF3, "%s_S3.rawfil", outputLoc)
+	printf("Data will be saved to %s_SN.rawfil once processing is finished.\n\n", outputLoc)
+
+
+
+	cdef int j, k, kSet
+	cdef int rawBeamletCount = 122 * bitOffset
+	cdef int beamletCount = rawBeamletCount * ports
+	cdef int scans = 16
+	cdef int port, beamletBase
+
+	cdef long iL, baseOffset, beamletIdx
+	cdef long udpPacketLength = 7824 * bitOffset
+	cdef long udpHeaderLength = 16 * bitOffset
+	cdef long timeIdx = 0
+
+	cdef long long dataLength = int(packetCount * beamletCount * scans)
+
+	printf("Output expected to be %lld bytes long per component, from %lld packets.\n", dataLength * sizeof(DTYPE_t_2), packetCount)
+	printf("Allocating memory for processing operations...\n")
+
+
+	# Initialise memory for our data, setup memviews
+	# Cython requires empties be setup if we are going to define a variable,
+	# 	so file 1 element arrays for the unused shape.
+	structuredFileData0 = np.zeros((packetCount * scans, beamletCount), dtype = DTYPE_1)
+	structuredFileData1 = np.zeros((packetCount * scans, beamletCount), dtype = DTYPE_1)
+	structuredFileData2 = np.zeros((packetCount * scans, beamletCount), dtype = DTYPE_1)
+	structuredFileData3 = np.zeros((packetCount * scans, beamletCount), dtype = DTYPE_1)
+
+	cdef DTYPE_t_1[:, ::1] structuredFileData_view0 = structuredFileData0
+	cdef DTYPE_t_1[:, ::1] structuredFileData_view1 = structuredFileData1
+	cdef DTYPE_t_1[:, ::1] structuredFileData_view2 = structuredFileData2
+	cdef DTYPE_t_1[:, ::1] structuredFileData_view3 = structuredFileData3
+
+	printf("\n\nRemoving UDP headers in memory...\n")
+
+	for port in range(ports):
+		for iL in prange(packetCount, nogil = True, schedule = 'guided', num_threads = threadCount):
+			baseOffset = udpPacketLength * (packetCount * port) + udpPacketLength * iL + udpHeaderLength
+			beamletBase = rawBeamletCount * port
+
+			for j in range(rawBeamletCount):
+				beamletIdx = baseOffset + j * scans * 4
+				for k in range(scans):
+					# Filterbank expects the frequency to be reversed compared to input flow
+					kSet = k * 4
+					timeIdx = iL * scans + k
+					structuredFileData_view0[timeIdx][beamletBase + j] = fileData[beamletIdx + kSet] # Xr
+					structuredFileData_view1[timeIdx][beamletBase + j] = fileData[beamletIdx + kSet + 1] # Xi
+					structuredFileData_view2[timeIdx][beamletBase + j] = fileData[beamletIdx + kSet + 2] # Yr
+					structuredFileData_view3[timeIdx][beamletBase + j] = fileData[beamletIdx + kSet + 3] # Yi
+
+	printf("Writing data block to disk...\n")
+	writeDataRaw(structuredFileData_view0, dataLength, outputF0)
+	writeDataRaw(structuredFileData_view1, dataLength, outputF1)
+	writeDataRaw(structuredFileData_view2, dataLength, outputF2)
+	writeDataRaw(structuredFileData_view3, dataLength, outputF3)
+	# Release the raw data.
+	printf("Releasing raw file data...\n")
+	free(fileData)
+

@@ -523,22 +523,21 @@ if ( $mode == "standard" || $mode == "4bit" ) then
 else if ( $mode == "cdmt" || $mode == "cdmt-4bit" ) then
 
     #echo "Let this be a reminder of the time you offset the entire observation by cat'ing the header into raw files..."
-    if ( $mode == "cdmt" ) then 
-        set procports=`echo $nports | awk '{print $1-1}'`
-        foreach portoff (`seq 0 1 $procports`)
-            set portid = `echo $startport $portoff | awk '{print $1 + $2}'`
-            set filepatch=`echo $readfile | sed -e 's/'"$startport"'/'"$portid"'/'`
-            if ( $cdmt_split_ports == 0 )  then
-                echo "Forming symlink for CDMT between "$filepatch" and "$outfile'_S'$portoff
+    set procports=`echo $nports | awk '{print $1-1}'`
+    foreach portoff (`seq 0 1 $procports`)
+        set portid = `echo $startport $portoff | awk '{print $1 + $2}'`
+        set filepatch=`echo $readfile | sed -e 's/'"$startport"'/'"$portid"'/'`
+        if ( $cdmt_split_ports == 0 )  then
+            echo "Forming symlink for CDMT between "$filepatch" and "$outfile'_S'$portoff
 
-                ln -s $filepatch $outfile'_S'$portoff
-            else 
-                echo "Forming symlink for CDMT between "$filepatch" and "$outfile'_'$portid'_S0'
-                
-                ln -s $filepatch $outfile'_'$portid'_S0'
-            endif
-        end
-    endif
+            ln -s $filepatch $outfile'_S'$portoff
+        else 
+            echo "Forming symlink for CDMT between "$filepatch" and "$outfile'_'$portid'_S0'
+            
+            ln -s $filepatch $outfile'_'$portid'_S0'
+        endif
+    end
+
 
 else
     printf "\033[5;31m"
@@ -617,7 +616,7 @@ if ($status > 0) then
     goto marbhfail
 endif
 
-if ( $mode != "cdmt" ) then 
+if ( $mode !~ "cdmt" ) then 
     foreach loop (`seq 0 $nloops`)
         set hd = `echo $loop $chunksize | awk --bignum '{print $1*$2}'`
 
@@ -694,7 +693,7 @@ if ( $mode == "cdmt" || $mode == "cdmt-4bit" ) then
 
     endif
 
-    if ( $mode == "cdmt" ) then
+    if ( $cdmt_flags !~ "-u" ) then
         set $cdmt_flag = $cdmt_flags' -u'
     endif
 
@@ -711,7 +710,7 @@ if ( $mode == "cdmt" || $mode == "cdmt-4bit" ) then
             echo "Port "$portid
             echo "bash -c $cdmtcmd $cdmt_flags -N $cdmt_ngulp -d $cdmt_dm -o $outfile'_'$portid $outfile'_'$portid"
             bash -c "$cdmtcmd $cdmt_flags -N $cdmt_ngulp -d $cdmt_dm -o $outfile'_'$portid $outfile'_'$portid"
-            
+
         end
 
     endif
@@ -721,48 +720,24 @@ if ( $mode == "cdmt" || $mode == "cdmt-4bit" ) then
         goto marbhfail
     endif
 
-    if ( $mode == "cdmt-4bit" ) then
-        set cdmtcleanup = `printenv CDMT_CLEANUP`
-        if ( $cdmtcleanup == "1" ) then 
-            echo "CDMT_CLEANUP=1: Removing CDMT artefacts"
-            goto cdmtcleanup
-        else if ( $cdmtcleanup == "0" ) then 
-            echo "CDMT_CLEANUP=0: Skipping cleanup"
-            goto marbh
-        endif
-        
-        echo 'Remove intermediate filterbanks? [YES/no]'
-        set input = $<
-
-        if ( $input == 'no' ) then
-            echo "Not removing intermediate filterbanks."
-            goto symclean
-        endif
-
-        cdmtcleanup:
-        echo "Removing intermediate filterbanks..."
-        # tcsh can't RM on a wildcard? 
-        rm "$outfile"_S*.rawfil
-        echo "Filterbanks removed." 
-    endif
 
     symclean:
-    if ( $mode == "cdmt" ) then 
-        set procports=`echo $nports | awk '{print $1-1}'`
-        foreach portoff (`seq 0 1 $procports`)
-            set portid = `echo $startport $portoff | awk '{print $1 + $2}'`
 
-            set filepatch=`echo $readfile | sed -e 's/'"$startport"'/'"$portid"'/'`
-            echo "Removing symlink for CDMT between "$filepatch" and "$outfile'_S'$portoff
+    set procports=`echo $nports | awk '{print $1-1}'`
+    foreach portoff (`seq 0 1 $procports`)
+        set portid = `echo $startport $portoff | awk '{print $1 + $2}'`
 
-            rm $outfile'_S'$portoff
+        set filepatch=`echo $readfile | sed -e 's/'"$startport"'/'"$portid"'/'`
+        echo "Removing symlink for CDMT between "$filepatch" and "$outfile'_S'$portoff
 
-        end
+        rm $outfile'_S'$portoff
 
-        if ( "$file" =~ *.zst ) then
-            goto compcleanup
-        endif
+    end
+
+    if ( "$file" =~ *.zst ) then
+        goto compcleanup
     endif
+
 endif
 
 

@@ -236,7 +236,11 @@ endif
 if ( $#argv > 12 ) then
     set startport = $argv[12]
     set nports = $argv[13]
-    if ( $nports == "" ) then
+    if ( $mode == "cdmt" ) then
+        if ( $nports != "4" ) then
+            echo "CDMT (8bit) must be provided 4 ports of data; setting nports to 4."
+            set nports = 4
+    else if ( $nports == "" ) then
         set nports = 1
     endif
 else
@@ -305,7 +309,7 @@ set data_cap = `echo $ram | awk --bignum -v ram_factor=$ram_factor '{print int($
 
 echo 'You have '$ram' bytes of ram available.'
 echo 'We will plan to use less than '$data_cap' bytes.'
-if ( $data_cap > 53690000000 ) then
+if ( $data_cap > 536900000000 ) then
     printf "\033[1;33m"
     echo "We recommend keeping this value below 50GB; consider lowering ram_factor in future runs."
     printf "\033[0m\n"
@@ -506,10 +510,19 @@ if ( $mode == "standard" || $mode == "4bit" ) then
 
 else if ( $mode == "cdmt" || $mode == "cdmt-4bit" ) then
 
-    cat $outfile".sigprochdr" > $outfile"_S0.rawfil"
-    cat $outfile".sigprochdr" > $outfile"_S1.rawfil"
-    cat $outfile".sigprochdr" > $outfile"_S2.rawfil"
-    cat $outfile".sigprochdr" > $outfile"_S3.rawfil"
+    #echo "Let this be a reminder of the time you offset the entire observation by cat'ing the header into raw files..."
+    if ( $mode == "cdmt" ) then 
+        set procports=`echo $nports | awk '{print $1-1}'`
+        foreach portoff (`seq 0 1 $procports`)
+            set portid = `echo $startport $portoff | awk '{print $1 + $2}'`
+
+            set filepatch=`echo $readfile | sed -e 's/'"$startport"'/'"$portid"'/'`
+            echo "Forming symlink for CDMT between "$filepatch" and "$outfile'_S'$portoff
+
+            ln -s $filepatch $outfile'_S'$portoff
+
+        end
+    endif
 
 else
     printf "\033[5;31m"
@@ -519,8 +532,7 @@ endif
 
 if ( $debug == 1 ) then
     echo "testval: "$testval" "
-    echo "debug: "$debug" "
-    echo "headersize: "$headersize" "
+    echo "debug: "$debu $headersize" "
     echo "packet_size: "$packet_size" "
     echo "dumpCmd: "$dumpCmd" "
     echo "host: "$host" "
@@ -589,50 +601,56 @@ if ($status > 0) then
     goto marbhfail
 endif
 
-foreach loop (`seq 0 $nloops`)
-    set hd = `echo $loop $chunksize | awk --bignum '{print $1*$2}'`
+if ( $mode != "cdmt" ) then 
+    foreach loop (`seq 0 $nloops`)
+        set hd = `echo $loop $chunksize | awk --bignum '{print $1*$2}'`
 
-    echo "Iteration "$loop" of "$nloops
-    echo "bash -c 'python3 $wrappercmd -mode $mode -infile $readfile -start $hd -readlength $chunksize -o $outfile -I $stokesI -V $stokesV -sumSize $timeWindow -fftSize $fftWindow -t $ncores_avail -p $startport -n $nports'"
-    if (! $debug == 1) bash -c "python3 $wrappercmd -mode $mode -infile $readfile -start $hd -readlength $chunksize -o $outfile -I $stokesI -V $stokesV -sumSize $timeWindow -fftSize $fftWindow -t $ncores_avail -p $startport -n $nports"
-    
-    if ( $status == 2 ) then
-        set exitcode = 11
-        goto marbhfail
+        echo "Iteration "$loop" of "$nloops
+        echo "bash -c 'python3 $wrappercmd -mode $mode -infile $readfile -start $hd -readlength $chunksize -o $outfile -I $stokesI -V $stokesV -sumSize $timeWindow -fftSize $fftWindow -t $ncores_avail -p $startport -n $nports'"
+        if (! $debug == 1) bash -c "python3 $wrappercmd -mode $mode -infile $readfile -start $hd -readlength $chunksize -o $outfile -I $stokesI -V $stokesV -sumSize $timeWindow -fftSize $fftWindow -t $ncores_avail -p $startport -n $nports"
+        
+        if ( $status == 2 ) then
+            set exitcode = 11
+            goto marbhfail
+        endif
+    end
+
+    printf "\n\n"
+    echo "Filterbank formed."
+    printf "\n\n"
+
+    if ( "$file" =~ *.zst ) then
+        compcleanup:
+        echo ""
+
+        set zstdcleanup = `printenv ZSTD_CLEANUP`
+        if ( $zstdcleanup == "1" ) then 
+            echo "ZSTD_CLEANUP=1: Removing ZSTD artefacts"
+            goto zstdcleanup
+        else if ( $zstdcleanup == "0" ) then 
+            echo "ZSTD_CLEANUP=0: Skipping cleanup"
+            goto endzstdcleanup
+        endif
+
+        echo "Clean up decompression artefacts? [yes/NO]"
+        set input = $<
+        if ( $input == 'yes' ) then
+            zstdcleanup:
+            echo "Cleaning up decompression artefacts."
+            foreach portoff (`seq 0 1 $procports`)
+                set portid = `echo $startport $portoff | awk '{print $1 + $2}'`
+                rm $outfile'.'$portid'.decompressed'
+
+            end
+            rm "$outfile"*.decompressed
+        endif
+        endzstdcleanup:
+
+        if ( $mode == "cdmt" ) then
+            goto marbh
+        endif
     endif
-end
-
-printf "\n\n"
-echo "Filterbank formed."
-printf "\n\n"
-
-if ( "$file" =~ *.zst ) then
-    echo ""
-
-    set zstdcleanup = `printenv ZSTD_CLEANUP`
-    if ( $zstdcleanup == "1" ) then 
-        echo "ZSTD_CLEANUP=1: Removing ZSTD artefacts"
-        goto zstdcleanup
-    else if ( $zstdcleanup == "0" ) then 
-        echo "ZSTD_CLEANUP=0: Skipping cleanup"
-        goto endzstdcleanup
-    endif
-
-    echo "Clean up decompression artefacts? [yes/NO]"
-    set input = $<
-    if ( $input == 'yes' ) then
-        zstdcleanup:
-        echo "Cleaning up decompression artefacts."
-        foreach portoff (`seq 0 1 $procports`)
-            set portid = `echo $startport $portoff | awk '{print $1 + $2}'`
-            rm $outfile'.'$portid'.decompressed'
-
-        end
-        rm "$outfile"*.decompressed
-    endif
-    endzstdcleanup:
 endif
-
 
 if ( $mode == "cdmt" || $mode == "cdmt-4bit" ) then
 
@@ -660,9 +678,17 @@ if ( $mode == "cdmt" || $mode == "cdmt-4bit" ) then
 
     endif
 
+    if ( $mode == "cdmt" ) then
+        set extraflag = '-u'
+    else
+        set extraflag = ""
+    endif
+
+    set extraflag=$extraflag" "`printenv CDMT_FLAGS`
+
     echo "Executing CDMT command..."
-    echo "bash -c $cdmtcmd -b $cdmt_time_avg -N $cdmt_ngulp -n $cdmt_overlap -d $cdmt_dm -o $outfile $outfile"
-    bash -c "$cdmtcmd -b $cdmt_time_avg -N $cdmt_ngulp -n $cdmt_overlap -d $cdmt_dm -o $outfile $outfile"
+    echo "bash -c $cdmtcmd -b $cdmt_time_avg -N $cdmt_ngulp -n $cdmt_overlap -d $cdmt_dm $extraflag -o $outfile $outfile"
+    bash -c "$cdmtcmd -b $cdmt_time_avg -N $cdmt_ngulp -n $cdmt_overlap -d $cdmt_dm $extraflag -o $outfile $outfile"
     
     if ( $status > 0 ) then
         echo "CDMT exiting unexpectedly. Exiting."
@@ -670,30 +696,48 @@ if ( $mode == "cdmt" || $mode == "cdmt-4bit" ) then
         goto marbhfail
     endif
 
-    set cdmtcleanup = `printenv CDMT_CLEANUP`
-    if ( $cdmtcleanup == "1" ) then 
-        echo "CDMT_CLEANUP=1: Removing CDMT artefacts"
-        goto cdmtcleanup
-    else if ( $cdmtcleanup == "0" ) then 
-        echo "CDMT_CLEANUP=0: Skipping cleanup"
-        goto marbh
+    if ( $mode == "cdmt-4bit" ) then
+        set cdmtcleanup = `printenv CDMT_CLEANUP`
+        if ( $cdmtcleanup == "1" ) then 
+            echo "CDMT_CLEANUP=1: Removing CDMT artefacts"
+            goto cdmtcleanup
+        else if ( $cdmtcleanup == "0" ) then 
+            echo "CDMT_CLEANUP=0: Skipping cleanup"
+            goto marbh
+        endif
+        
+        echo 'Remove intermediate filterbanks? [YES/no]'
+        set input = $<
+
+        if ( $input == 'no' ) then
+            echo "Not removing intermediate filterbanks."
+            goto symclean
+        endif
+
+        cdmtcleanup:
+        echo "Removing intermediate filterbanks..."
+        # tcsh can't RM on a wildcard? 
+        rm "$outfile"_S*.rawfil
+        echo "Filterbanks removed." 
     endif
-    
-    echo 'Remove intermediate filterbanks? [YES/no]'
-    set input = $<
 
-    if ( $input == 'no' ) then
-        echo "Not removing intermediate filterbanks."
-        goto marbh
+    symclean:
+    if ( $mode == "cdmt" ) then 
+        set procports=`echo $nports | awk '{print $1-1}'`
+        foreach portoff (`seq 0 1 $procports`)
+            set portid = `echo $startport $portoff | awk '{print $1 + $2}'`
+
+            set filepatch=`echo $readfile | sed -e 's/'"$startport"'/'"$portid"'/'`
+            echo "Removing symlink for CDMT between "$filepatch" and "$outfile'_S'$portoff
+
+            rm $outfile'_S'$portoff
+
+        end
+
+        if ( "$file" =~ *.zst ) then
+            goto compcleanup
+        endif
     endif
-
-    cdmtcleanup:
-    echo "Removing intermediate filterbanks..."
-    # tcsh can't RM on a wildcard? 
-    rm "$outfile"_S*.rawfil
-    echo "Filterbanks removed." 
-
-
 endif
 
 

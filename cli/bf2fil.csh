@@ -50,7 +50,7 @@ if ($#argv < 6) then
 
     printf "\n\n\033[1;33mStandard optional parameters\033[0m: [stokesI] [stokesV] [time_averaging_length] [frequency_FFT_window] [startport] [number of ports] [target name] [RA](J2000, format hh:mm:ss.ddd) [DEC] (J2000, format dd.mm.ss.ddd))\n\n"
 
-    printf "\033[1;33mCDMT optional parameters\033[0m: [REQUIRED cdmt_dms] [cdmt_ngulp] [cdmt_overlap] [cdmt_time_averaging_length] [startport] [number of ports] [target name] [RA](J2000, format hh:mm:ss.ddd) [DEC] (J2000, format dd.mm.ss.ddd))\n"
+    printf "\033[1;33mCDMT optional parameters\033[0m: [REQUIRED cdmt_dms] [cdmt_split_ports] [cdmt_forward_fft_size] [cdmt_flags] [startport] [number of ports] [target name] [RA](J2000, format hh:mm:ss.ddd) [DEC] (J2000, format dd.mm.ss.ddd))\n"
     
     set exitvar = 3
     goto marbhfail
@@ -163,6 +163,7 @@ if ( $mode == "standard" || $mode == "4bit" ) then
     # Header data information
     set nbit = 32
     set dtype = 1
+    set cdmt_split_ports = 0
 
 
 else if ( $mode == "cdmt" || $mode == "cdmt-4bit" ) then
@@ -188,27 +189,35 @@ else if ( $mode == "cdmt" || $mode == "cdmt-4bit" ) then
     echo "CDMT DM: "$cdmt_dm
     
     if ( $#argv > 8 ) then
-        set cdmt_ngulp = $argv[9]
+        set cdmt_split_ports = $argv[9]
+    else
+        set cdmt_split_ports = 0
+    endif
+    echo "CDMT FFT Size: "$cdmt_ngulp
+
+    if ( $#argv > 9 ) then
+        set cdmt_ngulp = $argv[10]
     else
         set cdmt_ngulp = 4096
     endif
     echo "CDMT FFT Size: "$cdmt_ngulp
 
-    if ( $#argv > 9 ) then
-        set cdmt_overlap = $argv[10]
-    else
-        set cdmt_overlap = `echo $cdmt_ngulp | awk --bignum '{a = 2**(log($1)/log(2)-4); print a}'`
-    endif
-    echo "CDMT Overlap: "$cdmt_overlap
-
     if ( $#argv > 10 ) then
-        set cdmt_time_avg = $argv[11]
+        set cdmt_flags = $argv[11]
     else
-        set cdmt_time_avg = 1
+        set cdmt_flags = "-b 1"
     endif
-    echo "CDMT Sample Averaging: "$cdmt_time_avg
+    if ( $cdmt_flags !~ "-n " ) then
+        set cdmt_flags = $cdmt_flags" "`echo $cdmt_ngulp | awk --bignum '{a = 2**(log($1)/log(2)-4); print a}'`
+    endif
+    echo "CDMT Extra flags: "$flags
 
-    if ( -f $outfile"_S0.rawfil" || -f $outfile"_S1.rawfil" || -f $outfile"_S2.rawfil" || -f $outfile"_S3.rawfil" ) then 
+    if ( $cdmt_split_ports == 1 ) then 
+        if ( -f $outfile"_0.sigproghdr" || -f $outfile"_1.sigproghdr" || -f $outfile"_2.sigproghdr" || -f $outfile"_3.sigproghdr" ) then
+            goto headerexists
+        endif
+
+    else if ( -f $outfile"_S0.rawfil" || -f $outfile"_S1.rawfil" || -f $outfile"_S2.rawfil" || -f $outfile"_S3.rawfil" ) then 
         goto exists
     endif
 
@@ -236,11 +245,7 @@ endif
 if ( $#argv > 12 ) then
     set startport = $argv[12]
     set nports = $argv[13]
-    if ( $mode == "cdmt" ) then
-        if ( $nports != "4" ) then
-            echo "CDMT (8bit) must be provided 4 ports of data; setting nports to 4."
-            set nports = 4
-    else if ( $nports == "" ) then
+    if ( $nports == "" ) then
         set nports = 1
     endif
 else
@@ -293,6 +298,7 @@ if ( -f $outfile ) then
     set exitvar = 5
     goto marbhfail
 else if ( -f $outfile".sigprochdr" ) then
+    headerexists:
     printf "\033[5;31m"
     echo "Output header "$outfile".sigprochdr already exists, exiting before we overwrite any data."
     printf "\033[0m\n"
@@ -462,25 +468,31 @@ echo ""
 echo "Sticking on a SIGPROC header"
 echo ""
 if ( $freqtable == 0 ) then 
-    if ( $ra == 0 ) then
-        echo "$mockHeaderCmd -type $dtype -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits $nbit -tstart $MJD -nifs 1 -source $psrName $outfile'.sigprochdr'"
-        $mockHeaderCmd -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits $nbit -tstart $MJD -nifs 1 -source $psrName $outfile".sigprochdr"
+    if ( $cdmt_split_ports == 0 ) then
+        echo "$mockHeaderCmd -type $dtype -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits $nbit -tstart $MJD -nifs 1 -ra $ra -dec $dec -source $psrName $outfile'.sigprochdr'"
+        $mockHeaderCmd -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits $nbit -tstart $MJD -nifs 1 -ra $ra -dec $dec -source $psrName $outfile".sigprochdr"
 
     else
+        set procports=`echo $nports | awk '{print $1-1}'`
+        foreach portoff (`seq 0 1 $procports`)
+            set portid = `echo $startport $portoff | awk '{print $1 + $2}'`
+
+            echo "Port "$portid
+            set fch1_cdmt = `echo $fch1 $foff $portid | awk '{f=$1+$2*122*$portid; printf("%0.9lf\n", f)}'`
+            set nchans = 122
+            echo "$mockHeaderCmd -type $dtype -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -fch1 $fch1_cdmt -fo $fo -nchans $nchan -nbits $nbit -tstart $MJD -nifs 1 -ra $ra -dec $dec -source $psrName $outfile'_'$portid'.sigprochdr'"
+            $mockHeaderCmd -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -fch1 $fch1_cdmt -fo $fo -nchans $nchan -nbits $nbit -tstart $MJD -nifs 1 -ra $ra -dec $dec -source $psrName $outfile"_"$portid".sigprochdr"
+
+        end
+
         echo "$mockHeaderCmd -type $dtype -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits $nbit -tstart $MJD -nifs 1 -ra $ra -dec $dec -source $psrName $outfile'.sigprochdr'"
         $mockHeaderCmd -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits $nbit -tstart $MJD -nifs 1 -ra $ra -dec $dec -source $psrName $outfile".sigprochdr"
 
     endif
 else
-    if ( $ra == 0 ) then
-        echo "$mockHeaderCmd -type $dtype -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -freqtab $fch1 -nchans $nchan -nbits $nbit -tstart $MJD -nifs 1 -source $psrName $outfile'.sigprochdr'"
-        $mockHeaderCmd -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -freqtab $fch1 -nchans $nchan -nbits $nbit -tstart $MJD -nifs 1 -source $psrName $outfile".sigprochdr"
+    echo "$mockHeaderCmd -type $dtype -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -freqtab -fo $fch1 -nchans $nchan -nbits $nbit -tstart $MJD -nifs 1 -ra $ra -dec $dec -source $psrName $outfile'.sigprochdr'"
+    $mockHeaderCmd -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -freqtab $fch1 -nchans $nchan -nbits $nbit -tstart $MJD -nifs 1 -ra $ra -dec $dec -source $psrName $outfile".sigprochdr"
 
-    else
-        echo "$mockHeaderCmd -type $dtype -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -freqtab -fo $fch1 -nchans $nchan -nbits $nbit -tstart $MJD -nifs 1 -ra $ra -dec $dec -source $psrName $outfile'.sigprochdr'"
-        $mockHeaderCmd -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -freqtab $fch1 -nchans $nchan -nbits $nbit -tstart $MJD -nifs 1 -ra $ra -dec $dec -source $psrName $outfile".sigprochdr"
-
-    endif
 endif
 
 
@@ -515,12 +527,16 @@ else if ( $mode == "cdmt" || $mode == "cdmt-4bit" ) then
         set procports=`echo $nports | awk '{print $1-1}'`
         foreach portoff (`seq 0 1 $procports`)
             set portid = `echo $startport $portoff | awk '{print $1 + $2}'`
-
             set filepatch=`echo $readfile | sed -e 's/'"$startport"'/'"$portid"'/'`
-            echo "Forming symlink for CDMT between "$filepatch" and "$outfile'_S'$portoff
+            if ( $cdmt_split_ports == 0 )  then
+                echo "Forming symlink for CDMT between "$filepatch" and "$outfile'_S'$portoff
 
-            ln -s $filepatch $outfile'_S'$portoff
-
+                ln -s $filepatch $outfile'_S'$portoff
+            else 
+                echo "Forming symlink for CDMT between "$filepatch" and "$outfile'_'$portid'_S0'
+                
+                ln -s $filepatch $outfile'_'$portid'_S0'
+            endif
         end
     endif
 
@@ -679,17 +695,26 @@ if ( $mode == "cdmt" || $mode == "cdmt-4bit" ) then
     endif
 
     if ( $mode == "cdmt" ) then
-        set extraflag = '-u'
-    else
-        set extraflag = ""
+        set $cdmt_flag = $cdmt_flags' -u'
     endif
 
-    set extraflag=$extraflag" "`printenv CDMT_FLAGS`
 
     echo "Executing CDMT command..."
-    echo "bash -c $cdmtcmd -b $cdmt_time_avg -N $cdmt_ngulp -n $cdmt_overlap -d $cdmt_dm $extraflag -o $outfile $outfile"
-    bash -c "$cdmtcmd -b $cdmt_time_avg -N $cdmt_ngulp -n $cdmt_overlap -d $cdmt_dm $extraflag -o $outfile $outfile"
-    
+    if ( $cdmt_split_ports == 0 ) then
+        echo "bash -c $cdmtcmd $cdmt_flags -N $cdmt_ngulp -d $cdmt_dm -o $outfile $outfile"
+        bash -c "$cdmtcmd $cdmt_flags -N $cdmt_ngulp -d $cdmt_dm -o $outfile $outfile"
+    else
+        set procports=`echo $nports | awk '{print $1-1}'`
+        foreach portoff (`seq 0 1 $procports`)
+            set portid = `echo $startport $portoff | awk '{print $1 + $2}'`
+
+            echo "Port "$portid
+            echo "bash -c $cdmtcmd $cdmt_flags -N $cdmt_ngulp -d $cdmt_dm -o $outfile'_'$portid $outfile'_'$portid"
+            bash -c "$cdmtcmd $cdmt_flags -N $cdmt_ngulp -d $cdmt_dm -o $outfile'_'$portid $outfile'_'$portid"
+            
+        end
+
+    endif
     if ( $status > 0 ) then
         echo "CDMT exiting unexpectedly. Exiting."
         set exitvar = 11

@@ -480,15 +480,11 @@ if ( $freqtable == 0 ) then
 
             echo "Port "$portid
             set nchans = `echo 122 $bitoffset | awk '{print $1 * $2}'`
-            set fch1_cdmt = `echo $fch1 $foff $portid $nchan | awk '{f=$1+$4*$2-$2*122*$portid; printf("%0.9lf\n", f)}'`
+            set fch1_cdmt = `echo $fch1 $foff $portid $nchan $nchans | awk '{f=$1+$4*$2-$2*$5*$portid; printf("%0.9lf\n", f)}'`
             echo "$mockHeaderCmd -type $dtype -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -fch1 $fch1_cdmt -fo $fo -nchans $nchan -nbits $nbit -tstart $MJD -nifs 1 -ra $ra -dec $dec -source $psrName $outfile'_'$portid'.sigprochdr'"
             $mockHeaderCmd -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -fch1 $fch1_cdmt -fo $fo -nchans $nchan -nbits $nbit -tstart $MJD -nifs 1 -ra $ra -dec $dec -source $psrName $outfile"_"$portid".sigprochdr"
 
         end
-
-        echo "$mockHeaderCmd -type $dtype -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits $nbit -tstart $MJD -nifs 1 -ra $ra -dec $dec -source $psrName $outfile'.sigprochdr'"
-        $mockHeaderCmd -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits $nbit -tstart $MJD -nifs 1 -ra $ra -dec $dec -source $psrName $outfile".sigprochdr"
-
     endif
 else
     echo "$mockHeaderCmd -type $dtype -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -freqtab -fo $fch1 -nchans $nchan -nbits $nbit -tstart $MJD -nifs 1 -ra $ra -dec $dec -source $psrName $outfile'.sigprochdr'"

@@ -193,7 +193,7 @@ else if ( $mode == "cdmt" || $mode == "cdmt-4bit" ) then
     else
         set cdmt_split_ports = 0
     endif
-    echo "CDMT FFT Size: "$cdmt_ngulp
+    echo "CDMT Split ports: "$cdmt_split_ports
 
     if ( $#argv > 9 ) then
         set cdmt_ngulp = $argv[10]
@@ -473,13 +473,14 @@ if ( $freqtable == 0 ) then
         $mockHeaderCmd -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -fch1 $fch1 -fo $fo -nchans $nchan -nbits $nbit -tstart $MJD -nifs 1 -ra $ra -dec $dec -source $psrName $outfile".sigprochdr"
 
     else
+        set nchans = `echo 122 $bitoffset | awk '{print $1 * $2}'`
         set procports=`echo $nports | awk '{print $1-1}'`
         foreach portoff (`seq 0 1 $procports`)
             set portid = `echo $startport $portoff | awk '{print $1 + $2}'`
 
             echo "Port "$portid
-            set fch1_cdmt = `echo $fch1 $foff $portid | awk '{f=$1+$2*122*$portid; printf("%0.9lf\n", f)}'`
-            set nchans = 122
+            set nchans = `echo 122 $bitoffset | awk '{print $1 * $2}'`
+            set fch1_cdmt = `echo $fch1 $foff $portid $nchan | awk '{f=$1+$4*$2-$2*122*$portid; printf("%0.9lf\n", f)}'`
             echo "$mockHeaderCmd -type $dtype -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -fch1 $fch1_cdmt -fo $fo -nchans $nchan -nbits $nbit -tstart $MJD -nifs 1 -ra $ra -dec $dec -source $psrName $outfile'_'$portid'.sigprochdr'"
             $mockHeaderCmd -raw $rawfilepatch -tel $telescope_id -tsamp $tsamp -fch1 $fch1_cdmt -fo $fo -nchans $nchan -nbits $nbit -tstart $MJD -nifs 1 -ra $ra -dec $dec -source $psrName $outfile"_"$portid".sigprochdr"
 

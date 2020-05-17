@@ -207,7 +207,7 @@ else if ( $mode == "cdmt" || $mode == "cdmt-4bit" ) then
     else
         set cdmt_flags = "-b 1"
     endif
-    if ( $cdmt_flags !~ "-n " ) then
+    if ( "$cdmt_flags" !~ "-n " ) then
         set cdmt_flags = $cdmt_flags" "`echo $cdmt_ngulp | awk --bignum '{a = 2**(log($1)/log(2)-4); print a}'`
     endif
     echo "CDMT Extra flags: "$flags
@@ -613,7 +613,7 @@ if ($status > 0) then
     goto marbhfail
 endif
 
-if ( $mode !~ "cdmt" ) then 
+if ( "$mode" !~ "cdmt" ) then 
     foreach loop (`seq 0 $nloops`)
         set hd = `echo $loop $chunksize | awk --bignum '{print $1*$2}'`
 
@@ -690,7 +690,7 @@ if ( $mode == "cdmt" || $mode == "cdmt-4bit" ) then
 
     endif
 
-    if ( $cdmt_flags !~ "-u" ) then
+    if ( "$cdmt_flags" !~ "-u" ) then
         set $cdmt_flag = $cdmt_flags' -u'
     endif
 
